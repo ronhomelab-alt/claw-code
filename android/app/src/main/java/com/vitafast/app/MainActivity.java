@@ -5,23 +5,38 @@ import android.app.Activity;
 import android.app.AlarmManager;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.PowerManager;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.widget.Toast;
 
 import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
 
     static final String CH_ALERT = "vitafast_fasts";
     static final String CH_ONGOING = "vitafast_ongoing";
+    static final int REQ_IMPORT = 42;
     private WebView web;
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -105,6 +120,53 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void exportData(String json) {
+            runOnUiThread(() -> {
+                String name = "vitafast-backup-"
+                        + new SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(new Date()) + ".json";
+                try {
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        ContentValues cv = new ContentValues();
+                        cv.put(MediaStore.Downloads.DISPLAY_NAME, name);
+                        cv.put(MediaStore.Downloads.MIME_TYPE, "application/json");
+                        cv.put(MediaStore.Downloads.IS_PENDING, 1);
+                        Uri item = getContentResolver().insert(
+                                MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+                        try (OutputStream os = getContentResolver().openOutputStream(item)) {
+                            os.write(json.getBytes("UTF-8"));
+                        }
+                        cv.clear();
+                        cv.put(MediaStore.Downloads.IS_PENDING, 0);
+                        getContentResolver().update(item, cv, null, null);
+                        toast("Backup saved to Downloads/" + name);
+                    } else {
+                        File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+                        File f = new File(dir, name);
+                        try (FileOutputStream fo = new FileOutputStream(f)) {
+                            fo.write(json.getBytes("UTF-8"));
+                        }
+                        toast("Backup saved: " + f.getAbsolutePath());
+                    }
+                } catch (Exception e) {
+                    toast("Export failed: " + e.getMessage());
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void importData() {
+            runOnUiThread(() -> {
+                Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.setType("*/*");
+                i.putExtra(Intent.EXTRA_MIME_TYPES,
+                        new String[]{"application/json", "text/plain", "text/*"});
+                try { startActivityForResult(i, REQ_IMPORT); }
+                catch (Exception e) { toast("No file picker available"); }
+            });
+        }
+
+        @JavascriptInterface
         public String getPermStatus() {
             boolean notif = getSystemService(NotificationManager.class).areNotificationsEnabled();
             boolean exact = true;
@@ -122,6 +184,32 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
             return o.toString();
         }
+    }
+
+    @Override
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req == REQ_IMPORT && res == RESULT_OK && data != null && data.getData() != null) {
+            try {
+                StringBuilder sb = new StringBuilder();
+                try (InputStream is = getContentResolver().openInputStream(data.getData());
+                     BufferedReader br = new BufferedReader(new InputStreamReader(is, "UTF-8"))) {
+                    String line;
+                    while ((line = br.readLine()) != null) sb.append(line).append('\n');
+                }
+                String quoted = JSONObject.quote(sb.toString());
+                if (web != null) {
+                    web.evaluateJavascript(
+                            "window.vfApplyImport && window.vfApplyImport(" + quoted + ")", null);
+                }
+            } catch (Exception e) {
+                toast("Import failed: " + e.getMessage());
+            }
+        }
+    }
+
+    private void toast(String msg) {
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
     }
 
     private void openAppDetails() {

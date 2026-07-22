@@ -217,6 +217,41 @@
     border-radius:999px;padding:9px 16px;cursor:pointer;
   }
 
+  /* ============ DATA / EDITOR ============ */
+  .databtns{display:flex;gap:10px;margin-top:12px}
+  .databtns .linkbtn{margin:0;flex:1;text-align:center}
+  .fastrow{cursor:pointer}
+  .fastrow .chev{color:var(--ink-3);font-size:16px;margin-left:8px}
+  .addbtn{margin:0;padding:6px 12px;font-size:12.5px}
+  .modal{
+    position:fixed;inset:0;z-index:50;display:flex;align-items:flex-end;justify-content:center;
+    background:rgba(2,10,12,.66);backdrop-filter:blur(3px);
+  }
+  .modal[hidden]{display:none}
+  .sheet{
+    width:100%;max-width:430px;background:var(--card);
+    border:1px solid var(--line);border-radius:20px 20px 0 0;
+    padding:20px 18px calc(20px + env(safe-area-inset-bottom));
+    animation:sheetUp .22s ease-out;
+  }
+  @keyframes sheetUp{from{transform:translateY(30px);opacity:.4}to{transform:translateY(0);opacity:1}}
+  .sheet h3{font-size:17px;font-weight:800;margin-bottom:14px}
+  .sheet label{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--ink-2);margin-bottom:12px}
+  .sheet input[type=datetime-local]{
+    background:var(--card-2);border:1px solid var(--hair);border-radius:11px;
+    color:var(--ink);font-size:15px;font-family:inherit;padding:11px 12px;color-scheme:dark;
+  }
+  .sheet-actions{display:flex;align-items:center;gap:10px;margin-top:6px}
+  .linkbtn.ghost{background:transparent;border-color:var(--hair);color:var(--ink-2)}
+  .linkbtn.danger{background:rgba(224,73,72,.14);border-color:rgba(224,73,72,.5);color:#ff9b9b}
+  #toast{
+    position:fixed;left:50%;bottom:calc(78px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(10px);
+    background:var(--card-2);border:1px solid var(--line);color:var(--ink);
+    padding:10px 16px;border-radius:999px;font-size:13px;font-weight:600;z-index:60;
+    opacity:0;pointer-events:none;transition:.25s;box-shadow:0 6px 24px rgba(0,0,0,.5);white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis;
+  }
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
   /* ============ NAV ============ */
   nav{
     position:fixed;bottom:0;left:50%;transform:translateX(-50%);
@@ -349,10 +384,38 @@
     </section>
 
     <section class="card hcard">
-      <h2>Fast log</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <h2 style="margin:0">Fast log</h2>
+        <button class="linkbtn addbtn" id="addFastBtn">＋ Add</button>
+      </div>
       <div id="fastLog"></div>
     </section>
+
+    <section class="card hcard">
+      <h2>Your data</h2>
+      <p class="note" style="margin-top:4px">Back up your schedule and full fast history to a file, or restore it on another device. Strictly your data — nothing leaves your phone unless you export it.</p>
+      <div class="databtns">
+        <button class="linkbtn" id="exportBtn">⬇︎ Export backup</button>
+        <button class="linkbtn ghost" id="importBtn">⬆︎ Import backup</button>
+      </div>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+    </section>
   </main>
+
+  <!-- ===== fast editor sheet ===== -->
+  <div class="modal" id="editModal" hidden>
+    <div class="sheet">
+      <h3 id="editTitle">Edit fast</h3>
+      <label>Started<input type="datetime-local" id="editStart"></label>
+      <label>Ended<input type="datetime-local" id="editEnd"></label>
+      <div class="sheet-actions">
+        <button class="linkbtn danger" id="editDelete">Delete</button>
+        <span style="flex:1"></span>
+        <button class="linkbtn ghost" id="editCancel">Cancel</button>
+        <button class="linkbtn" id="editSave">Save</button>
+      </div>
+    </div>
+  </div>
 
   <nav>
     <button id="navFast" class="on"><span class="nico">⏳</span>Fast</button>
@@ -836,16 +899,21 @@ function renderHistory(){
     $('#demoBtn').addEventListener('click', seedDemo);
     return;
   }
-  log.innerHTML = [...H].reverse().slice(0, 30).map(r => {
+  log.innerHTML = H.map((r, i) => ({ r, i })).reverse().slice(0, 60).map(({ r, i }) => {
     const e = new Date(r.end), s = new Date(r.start);
     const dstr = e.toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' });
     const t = `${s.getHours() % 12 || 12}:${String(s.getMinutes()).padStart(2,'0')} ${s.getHours() >= 12 ? 'PM' : 'AM'}
        → ${e.getHours() % 12 || 12}:${String(e.getMinutes()).padStart(2,'0')} ${e.getHours() >= 12 ? 'PM' : 'AM'}`;
-    return `<div class="fastrow">
+    return `<div class="fastrow" data-idx="${i}" role="button" tabindex="0">
       <div><div class="d">${dstr}</div><div class="t">${t}</div></div>
-      <div class="h">${fmtDur(Math.round(r.hours * 60))} <em>fasted</em></div>
+      <div style="display:flex;align-items:center">
+        <div class="h">${fmtDur(Math.round(r.hours * 60))} <em>fasted</em></div>
+        <span class="chev">›</span>
+      </div>
     </div>`;
   }).join('');
+  log.querySelectorAll('.fastrow').forEach(row =>
+    row.addEventListener('click', () => openEditor(+row.dataset.idx)));
 }
 
 function renderChart(H){
@@ -992,6 +1060,108 @@ function renderGreeting(){
     h < 5 ? 'Good Night! 🌙' : h < 12 ? 'Good Morning! ☀️' : h < 18 ? 'Good Afternoon! 👋' : 'Good Evening! 🌆';
 }
 
+/* ---------- toast ---------- */
+function toast(msg){
+  let t = document.getElementById('toast');
+  if (!t){ t = document.createElement('div'); t.id = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+/* ---------- history correction: edit / add / delete a fast ---------- */
+let editIdx = null;
+function toLocalInput(ms){
+  const d = new Date(ms), p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function openEditor(idx){
+  editIdx = (idx == null || isNaN(idx)) ? null : idx;
+  const rec = editIdx != null ? S.history[editIdx] : null;
+  const start = rec ? rec.start : Date.now() - durMin() * 60000;
+  const end = rec ? rec.end : Date.now();
+  $('#editTitle').textContent = editIdx != null ? 'Edit fast' : 'Add a fast';
+  $('#editStart').value = toLocalInput(start);
+  $('#editEnd').value = toLocalInput(end);
+  $('#editDelete').style.display = editIdx != null ? '' : 'none';
+  $('#editModal').hidden = false;
+}
+function closeEditor(){ $('#editModal').hidden = true; editIdx = null; }
+$('#editCancel').addEventListener('click', closeEditor);
+$('#editModal').addEventListener('click', e => { if (e.target.id === 'editModal') closeEditor(); });
+$('#editSave').addEventListener('click', () => {
+  const s = new Date($('#editStart').value).getTime();
+  const e = new Date($('#editEnd').value).getTime();
+  if (!s || !e){ toast('Please set both times'); return; }
+  if (e <= s){ toast('End must be after the start'); return; }
+  if (e > Date.now() + 60000){ toast("End can't be in the future"); return; }
+  const rec = { start: s, end: e, hours: (e - s) / 3600000 };
+  if (editIdx != null) S.history[editIdx] = rec; else S.history.push(rec);
+  S.history.sort((a,b) => a.end - b.end);
+  save(); closeEditor(); renderHistory();
+  toast(editIdx != null ? 'Fast updated' : 'Fast added');
+});
+$('#editDelete').addEventListener('click', () => {
+  if (editIdx != null){ S.history.splice(editIdx, 1); save(); }
+  closeEditor(); renderHistory(); toast('Fast deleted');
+});
+$('#addFastBtn').addEventListener('click', () => openEditor(null));
+
+/* ---------- backup: export / import ---------- */
+function backupJSON(){
+  return JSON.stringify({ app:'vitafast', v:1, exportedAt:new Date().toISOString(), data:S }, null, 2);
+}
+function exportBackup(){
+  const json = backupJSON();
+  if (window.VitaFastNative && window.VitaFastNative.exportData){
+    try { window.VitaFastNative.exportData(json); } catch(e){ toast('Export failed'); }
+    return;
+  }
+  const blob = new Blob([json], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'vitafast-backup.json';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  toast('Backup exported');
+}
+function importBackup(){
+  if (window.VitaFastNative && window.VitaFastNative.importData){
+    try { window.VitaFastNative.importData(); } catch(e){ toast('Import failed'); }
+    return;
+  }
+  $('#importFile').click();
+}
+function applyBackup(str){
+  try {
+    const obj = JSON.parse(str);
+    const d = (obj && obj.data) ? obj.data : obj;
+    if (!d || (!Array.isArray(d.days) && typeof d.start !== 'number')) throw new Error('Not a VitaFast backup');
+    const s = Object.assign({}, defaults, d);
+    if (!Array.isArray(s.days)){
+      const st = typeof d.start === 'number' ? d.start : 1080;
+      const en = typeof d.end === 'number' ? d.end : 660;
+      s.days = Array.from({length:7}, () => ({ start:st, end:en, active:true }));
+    }
+    s.days = s.days.map(x => ({ start:x.start ?? 1080, end:x.end ?? 660, active:x.active !== false }));
+    while (s.days.length < 7) s.days.push({ start:1080, end:660, active:true });
+    if (typeof s.editDay !== 'number') s.editDay = new Date().getDay();
+    s.history = Array.isArray(s.history) ? s.history : [];
+    S = s; loadDayIntoDial(); save(); renderAll();
+    toast(`Restored — ${S.history.length} fasts`);
+    return true;
+  } catch(e){ toast('Import failed: ' + e.message); return false; }
+}
+window.vfApplyImport = applyBackup;   // native import calls this
+$('#exportBtn').addEventListener('click', exportBackup);
+$('#importBtn').addEventListener('click', importBackup);
+$('#importFile').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => applyBackup(r.result);
+  r.readAsText(f);
+  e.target.value = '';
+});
+
 function renderAll(){
   renderGreeting();
   renderDial();
@@ -1030,17 +1200,14 @@ else if (location.hash === '#history'){ switchView('hist'); }
     } catch(e){}
   }
 
-  // every schedule/settings change funnels through save()
   var _save = window.save;
   window.save = function(){ _save(); vfPushConfig(); };
 
-  // native handles notification permission; alarms deliver in the background
   window.ensureNotifPermission = function(){
     try { window.VitaFastNative.requestNotificationPermission(); } catch(e){}
     return Promise.resolve(true);
   };
 
-  // reliability setup card
   window.vfRenderSetup = function(){
     var el = document.getElementById('setupCard');
     if (!el || !window.VitaFastNative.getPermStatus) return;
@@ -1073,7 +1240,6 @@ else if (location.hash === '#history'){ switchView('hist'); }
     });
   };
 
-  // refresh permission states when returning from system settings
   document.addEventListener('visibilitychange', function(){ if (!document.hidden) window.vfRenderSetup(); });
 
   var n = document.querySelector('.note');
