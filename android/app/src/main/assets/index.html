@@ -95,6 +95,34 @@
   @media (prefers-reduced-motion: reduce){.popIcon,.popRing{animation:none}.popRing{display:none}}
   .hint{color:var(--ink-3);font-size:12px;text-align:center;margin-top:10px}
 
+  /* ============ PRESETS + DAYS ============ */
+  .tools{display:flex;flex-direction:column;gap:12px;margin-top:12px;padding-top:12px;border-top:1px solid var(--hair)}
+  .presets{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+  .preset{border:1px solid var(--hair);background:transparent;color:var(--ink-2);
+    border-radius:999px;padding:7px 14px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;transition:.2s}
+  .preset.on{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
+  .dayrow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .dayrow .lbl{font-size:13.5px;color:var(--ink-2)}
+  .days{display:flex;gap:6px;justify-content:space-between}
+  .dayb{flex:1;aspect-ratio:1;max-width:42px;border:1px solid var(--hair);background:transparent;
+    color:var(--ink-2);border-radius:11px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;
+    display:flex;align-items:center;justify-content:center;transition:.2s}
+  .dayb.sel{border-color:var(--accent);color:var(--ink);box-shadow:0 0 0 1px var(--accent)}
+  .dayb.act{background:var(--accent-soft);color:var(--ink)}
+  .dayb.rest{opacity:.4}
+  .daymeta{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--ink-2)}
+
+  /* ============ SETUP CARD ============ */
+  .setup-item{display:flex;align-items:center;gap:11px;padding:10px 0;border-top:1px solid var(--hair)}
+  .setup-item:first-of-type{border-top:none}
+  .setup-item .si-ico{font-size:17px;width:20px;text-align:center}
+  .setup-item .si-txt{flex:1}
+  .setup-item .si-txt b{color:var(--ink);font-weight:700;font-size:13.5px}
+  .setup-item .si-txt p{font-size:11.5px;color:var(--ink-3);margin-top:1px}
+  .setup-item .si-act{border:1px solid var(--accent);background:var(--accent-soft);color:var(--ink);
+    border-radius:999px;padding:6px 13px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap}
+  .setup-item .si-ok{color:#4ade80;font-size:17px;font-weight:800}
+
   /* ============ STATUS ============ */
   .status-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
   .status-title{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
@@ -253,6 +281,17 @@
         <div class="pill" id="pillEnd"><span>End</span>11:00 AM</div>
       </div>
       <p class="hint">Drag 🌙 to set when fasting starts, ☀️ to set when it ends</p>
+      <div class="tools">
+        <div class="presets" id="presets"></div>
+        <div class="dayrow">
+          <span class="lbl">Same schedule every day</span>
+          <label class="switch"><input type="checkbox" id="sameToggle" checked><span class="tr"></span><span class="th"></span></label>
+        </div>
+        <div id="dayEditor" hidden>
+          <div class="days" id="days"></div>
+          <div class="daymeta" id="dayMeta"></div>
+        </div>
+      </div>
     </section>
 
     <section class="card">
@@ -269,9 +308,19 @@
         <div class="lbl">🔔 Notify me when a fast begins &amp; ends</div>
         <label class="switch"><input type="checkbox" id="notifToggle"><span class="tr"></span><span class="th"></span></label>
       </div>
+      <div class="rowline">
+        <div class="lbl">✨ Alert me as I enter each fasting phase</div>
+        <label class="switch"><input type="checkbox" id="milestoneToggle"><span class="tr"></span><span class="th"></span></label>
+      </div>
+      <div class="rowline">
+        <div class="lbl">⏱️ Live fasting status in the notification shade</div>
+        <label class="switch"><input type="checkbox" id="ongoingToggle"><span class="tr"></span><span class="th"></span></label>
+      </div>
       <p class="note">Prototype note: notifications fire while this page is open.
       The Android build will deliver them in the background via exact alarms.</p>
     </section>
+
+    <section class="card" id="setupCard" hidden></section>
 
     <section class="chips" id="chips"></section>
 
@@ -317,24 +366,55 @@
 const KEY = 'vitafast.v1';
 const DAY = 1440;
 const defaults = {
-  start: 18 * 60,        // 6:00 PM
-  end: 11 * 60,          // 11:00 AM
+  days: null,            // [{start,end,active} x7], index 0 = Sunday
+  perDay: false,         // false = one schedule shared by every day
+  editDay: 0,            // which day the dial is currently editing
   enabled: false,
-  notify: false,
+  notify: false,         // alert at fast start & end
+  milestones: false,     // alert on entering each phase
+  ongoing: false,        // live status notification during a fast
   activatedAt: null,     // ms timestamp when schedule was switched on
   lastLogged: null,      // ms timestamp of last auto-logged fast end
   history: []            // [{start:ms, end:ms, hours:number}]
 };
 let S = load();
 function load(){
-  try { return Object.assign({}, defaults, JSON.parse(localStorage.getItem(KEY)) || {}); }
-  catch { return { ...defaults }; }
+  let p = {};
+  try { p = JSON.parse(localStorage.getItem(KEY)) || {}; } catch {}
+  const s = Object.assign({}, defaults, p);
+  if (!Array.isArray(s.days)){
+    // migrate from the old single start/end model (or first run)
+    const st = (typeof p.start === 'number') ? p.start : 18 * 60;
+    const en = (typeof p.end === 'number') ? p.end : 11 * 60;
+    s.days = Array.from({length:7}, () => ({ start: st, end: en, active: true }));
+  } else {
+    s.days = s.days.map(d => ({ start: d.start ?? 1080, end: d.end ?? 660, active: d.active !== false }));
+    while (s.days.length < 7) s.days.push({ start: 1080, end: 660, active: true });
+  }
+  if (p.editDay == null) s.editDay = new Date().getDay();
+  const d = s.days[s.editDay] || s.days[0];
+  s.start = d.start; s.end = d.end;   // dial mirror of the day being edited
+  return s;
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(S)); }
 
 const $ = s => document.querySelector(s);
 const CX = 170, CY = 170, R = 128;
 const durMin = () => ((S.end - S.start + DAY) % DAY) || DAY;
+
+/* dial ⇄ per-day schedule sync */
+function loadDayIntoDial(){ const d = S.days[S.editDay]; S.start = d.start; S.end = d.end; }
+function writeDialToDays(){
+  if (S.perDay) S.days[S.editDay] = { ...S.days[S.editDay], start: S.start, end: S.end };
+  else for (let i = 0; i < 7; i++) S.days[i] = { ...S.days[i], start: S.start, end: S.end };
+}
+function durationForDay(d){ return ((d.end - d.start + DAY) % DAY) || DAY; }
+
+const PRESETS = [{h:16,l:'16:8'},{h:18,l:'18:6'},{h:20,l:'20:4'},{h:23,l:'OMAD'}];
+function applyPreset(h){
+  S.end = (S.start + h * 60) % DAY;
+  writeDialToDays(); save(); backfill(); renderAll();
+}
 
 /* ============================== STAGES ============================== */
 const STAGES = [
@@ -570,32 +650,47 @@ function renderStages(hours){
       renderDial(); renderStatus();
     }
   });
-  const up = () => { if (active){ active = null; save(); backfill(); renderAll(); } };
+  const up = () => { if (active){ active = null; writeDialToDays(); save(); backfill(); renderAll(); } };
   svg.addEventListener('pointerup', up);
   svg.addEventListener('pointercancel', up);
 })();
 
-/* ============================== SCHEDULE ENGINE ============================== */
+/* ============================== SCHEDULE ENGINE (day-aware) ============================== */
 function nowMin(){ const n = new Date(); return n.getHours() * 60 + n.getMinutes(); }
-function isFasting(){ return ((nowMin() - S.start + DAY) % DAY) < durMin(); }
 
-function nextBoundary(min){ // next Date at given minutes-of-day
-  const n = new Date(), t = new Date(n);
-  t.setHours(Math.floor(min / 60), min % 60, 0, 0);
-  if (t <= n) t.setDate(t.getDate() + 1);
-  return t;
+// The fast currently in progress (it may have started yesterday), or null.
+function activeFast(nowMs){
+  for (const back of [1, 0]){
+    const d = new Date(nowMs); d.setDate(d.getDate() - back); d.setHours(0,0,0,0);
+    const sched = S.days[d.getDay()];
+    if (!sched.active) continue;
+    const startMs = d.getTime() + sched.start * 60000;
+    const dur = durationForDay(sched);
+    const endMs = startMs + dur * 60000;
+    if (nowMs >= startMs && nowMs < endMs) return { startMs, endMs, dur, sched };
+  }
+  return null;
 }
-function prevBoundary(min){
-  const n = new Date(), t = new Date(n);
-  t.setHours(Math.floor(min / 60), min % 60, 0, 0);
-  if (t > n) t.setDate(t.getDate() - 1);
-  return t;
+// The next fast that will begin after nowMs.
+function nextFastStart(nowMs){
+  for (let k = 0; k < 8; k++){
+    const d = new Date(nowMs); d.setDate(d.getDate() + k); d.setHours(0,0,0,0);
+    const sched = S.days[d.getDay()];
+    if (!sched.active) continue;
+    const startMs = d.getTime() + sched.start * 60000;
+    if (startMs > nowMs) return { startMs, dur: durationForDay(sched), sched };
+  }
+  return null;
 }
+function isFasting(){ return !!activeFast(Date.now()); }
+function anyActiveDay(){ return S.days.some(d => d.active); }
 
 function renderStatus(){
   const dot = $('#schedDot'), body = $('#statusBody');
   $('#schedToggle').checked = S.enabled;
   $('#notifToggle').checked = S.notify;
+  $('#milestoneToggle').checked = S.milestones;
+  $('#ongoingToggle').checked = S.ongoing;
   dot.classList.toggle('on', S.enabled);
   const progWrap = $('#progWrap'), elapsedArc = $('#elapsedArc');
 
@@ -607,69 +702,101 @@ function renderStatus(){
     elapsedArc.setAttribute('opacity', '0');
     return;
   }
-  if (isFasting()){
-    const started = prevBoundary(S.start);
-    const ends = nextBoundary(S.end);
-    const elapsed = Math.floor((Date.now() - started) / 60000);
-    const remain = Math.max(0, Math.floor((ends - Date.now()) / 60000));
-    const pct = Math.min(100, elapsed / durMin() * 100);
+  const now = Date.now();
+  const af = activeFast(now);
+  if (af){
+    const elapsed = Math.floor((now - af.startMs) / 60000);
+    const remain = Math.max(0, Math.floor((af.endMs - now) / 60000));
+    const pct = Math.min(100, elapsed / af.dur * 100);
     const zone = currentZone(elapsed / 60);
+    const endMin = new Date(af.endMs).getHours() * 60 + new Date(af.endMs).getMinutes();
+    const startMin = new Date(af.startMs).getHours() * 60 + new Date(af.startMs).getMinutes();
     body.innerHTML = `<b>Fasting in progress</b> ${zone.icon} ${zone.name} zone
       <div class="bigcount"><i>${fmtDur(elapsed)}</i> elapsed</div>
-      ${fmtDur(remain)} remaining · ends <b>${fmt(S.end)}</b>`;
+      ${fmtDur(remain)} remaining · ends <b>${fmt(endMin)}</b>`;
     progWrap.style.display = 'block';
     $('#progFill').style.width = pct + '%';
-    elapsedArc.setAttribute('d', arcPath(S.start, nowMin(), 112));
+    elapsedArc.setAttribute('d', arcPath(startMin, nowMin(), 112));
     elapsedArc.setAttribute('opacity', '.9');
   } else {
-    const starts = nextBoundary(S.start);
-    const inMin = Math.floor((starts - Date.now()) / 60000);
-    body.innerHTML = `<b>Eating window</b> 🍽️
-      <div class="bigcount">Next fast in <i>${fmtDur(inMin)}</i></div>
-      Fasting begins automatically at <b>${fmt(S.start)}</b>.`;
+    const nf = nextFastStart(now);
     progWrap.style.display = 'none';
     elapsedArc.setAttribute('opacity', '0');
+    if (!nf){
+      body.innerHTML = `<b>No upcoming fasts</b> 🌙<br>Every day is set to a rest day —
+        mark a day active to schedule a fast.`;
+      return;
+    }
+    const inMin = Math.floor((nf.startMs - now) / 60000);
+    const startMin = new Date(nf.startMs).getHours() * 60 + new Date(nf.startMs).getMinutes();
+    body.innerHTML = `<b>Eating window</b> 🍽️
+      <div class="bigcount">Next fast in <i>${fmtDur(inMin)}</i></div>
+      Fasting begins automatically at <b>${fmt(startMin)}</b>.`;
   }
 }
 
-/* ---------- auto-logging (no manual start/stop) ---------- */
+/* ---------- auto-logging (no manual start/stop), day-aware ---------- */
 function backfill(){
   if (!S.enabled || !S.activatedAt) return;
-  const now = Date.now(), dm = durMin();
+  const now = Date.now();
   const from = Math.max(S.activatedAt, S.lastLogged || 0);
   const d0 = new Date(S.activatedAt); d0.setHours(0,0,0,0);
-  let added = false;
-  for (let k = 0; k < 120; k++){
-    const day = new Date(d0); day.setDate(day.getDate() + k);
-    const fs = new Date(day); fs.setHours(Math.floor(S.start/60), S.start%60, 0, 0);
-    const fe = fs.getTime() + dm * 60000;
-    if (fs.getTime() > now) break;
-    if (fs.getTime() >= S.activatedAt && fe <= now && fe > from){
-      S.history.push({ start: fs.getTime(), end: fe, hours: dm / 60 });
-      S.lastLogged = fe;
+  let added = false, last = S.lastLogged || 0;
+  for (let k = 0; k < 400; k++){
+    const day = new Date(d0); day.setDate(day.getDate() + k); day.setHours(0,0,0,0);
+    const sched = S.days[day.getDay()];
+    const fs = day.getTime() + (sched.active ? sched.start : 0) * 60000;
+    if (fs > now) break;
+    if (!sched.active) continue;
+    const dur = durationForDay(sched);
+    const fe = fs + dur * 60000;
+    if (fs >= S.activatedAt && fe <= now && fe > from){
+      S.history.push({ start: fs, end: fe, hours: dur / 60 });
+      last = Math.max(last, fe);
       added = true;
     }
   }
-  if (added){ S.history.sort((a,b) => a.end - b.end); save(); }
+  if (added){ S.lastLogged = last; S.history.sort((a,b) => a.end - b.end); save(); }
 }
 
 /* ---------- notifications ---------- */
 let wasFasting = null;
+let lastPhaseIdx = null;
 async function ensureNotifPermission(){
   if (!('Notification' in window)) return false;
   if (Notification.permission === 'granted') return true;
   return (await Notification.requestPermission()) === 'granted';
 }
 function notify(title, body){
-  if (!S.notify || !('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
   try { new Notification(title, { body, icon: undefined }); } catch {}
 }
 function tick(){
   if (S.enabled){
-    const f = isFasting();
+    const af = activeFast(Date.now());
+    const f = !!af;
     if (wasFasting !== null && f !== wasFasting){
-      if (f) notify('🌙 Fast started', `Your ${fmtDur(durMin())} fast has begun. It ends at ${fmt(S.end)}.`);
-      else { notify('☀️ Fast complete!', `You fasted ${fmtDur(durMin())}. Enjoy your eating window.`); backfill(); renderHistory(); }
+      if (f){
+        if (S.notify){
+          const endMin = new Date(af.endMs).getHours() * 60 + new Date(af.endMs).getMinutes();
+          notify('🌙 Fast started', `Your ${fmtDur(af.dur)} fast has begun. It ends at ${fmt(endMin)}.`);
+        }
+        lastPhaseIdx = 0;
+      } else {
+        if (S.notify) notify('☀️ Fast complete!', `Enjoy your eating window.`);
+        backfill(); renderHistory(); lastPhaseIdx = null;
+      }
+    }
+    // phase-milestone alerts, mid-fast
+    if (f && S.milestones){
+      const elapsedH = (Date.now() - af.startMs) / 3600000;
+      let idx = 0;
+      for (let i = 0; i < STAGES.length; i++) if (elapsedH >= STAGES[i].at) idx = i;
+      if (lastPhaseIdx !== null && idx > lastPhaseIdx){
+        const st = STAGES[idx];
+        notify(`${st.icon} ${st.name}`, st.effect);
+      }
+      lastPhaseIdx = idx;
     }
     wasFasting = f;
   }
@@ -799,6 +926,55 @@ $('#notifToggle').addEventListener('change', async ev => {
   }
   S.notify = ev.target.checked; save();
 });
+$('#milestoneToggle').addEventListener('change', async ev => {
+  if (ev.target.checked){
+    const ok = await ensureNotifPermission();
+    if (!ok){ ev.target.checked = false; return; }
+  }
+  S.milestones = ev.target.checked; save();
+});
+$('#ongoingToggle').addEventListener('change', async ev => {
+  if (ev.target.checked){
+    const ok = await ensureNotifPermission();
+    if (!ok){ ev.target.checked = false; return; }
+  }
+  S.ongoing = ev.target.checked; save();
+});
+
+/* ---------- presets + per-day schedule ---------- */
+function renderPresets(){
+  const wrap = $('#presets');
+  wrap.innerHTML = PRESETS.map(p =>
+    `<button class="preset ${durMin() === p.h * 60 ? 'on' : ''}" data-h="${p.h}">${p.l}</button>`).join('');
+  wrap.querySelectorAll('.preset').forEach(b =>
+    b.addEventListener('click', () => applyPreset(+b.dataset.h)));
+}
+const DAY_LETTER = ['S','M','T','W','T','F','S'];
+const DAY_NAME = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+function renderDays(){
+  $('#sameToggle').checked = !S.perDay;
+  $('#dayEditor').hidden = !S.perDay;
+  $('#days').innerHTML = S.days.map((d,i) =>
+    `<button class="dayb ${i === S.editDay ? 'sel' : ''} ${d.active ? 'act' : 'rest'}" data-i="${i}">${DAY_LETTER[i]}</button>`).join('');
+  const d = S.days[S.editDay];
+  $('#dayMeta').innerHTML =
+    `<span>${DAY_NAME[S.editDay]}: ${d.active ? fmt(d.start) + ' – ' + fmt(d.end) : 'Rest day (no fast)'}</span>
+     <label class="switch"><input type="checkbox" id="dayActive" ${d.active ? 'checked' : ''}><span class="tr"></span><span class="th"></span></label>`;
+  $('#days').querySelectorAll('.dayb').forEach(b =>
+    b.addEventListener('click', () => { S.editDay = +b.dataset.i; loadDayIntoDial(); save(); renderAll(); }));
+  const da = $('#dayActive');
+  if (da) da.addEventListener('change', e => {
+    S.days[S.editDay].active = e.target.checked; save(); backfill(); renderAll();
+  });
+}
+$('#sameToggle').addEventListener('change', e => {
+  S.perDay = !e.target.checked;
+  if (!S.perDay){ // collapse back to one shared schedule from the day being edited
+    const d = S.days[S.editDay];
+    for (let i = 0; i < 7; i++) S.days[i] = { start: d.start, end: d.end, active: true };
+  }
+  save(); backfill(); renderAll();
+});
 
 $('#navFast').addEventListener('click', () => switchView('fast'));
 $('#navHist').addEventListener('click', () => switchView('hist'));
@@ -819,8 +995,11 @@ function renderGreeting(){
 function renderAll(){
   renderGreeting();
   renderDial();
+  renderPresets();
+  renderDays();
   renderStatus();
   renderHistory();
+  if (window.vfRenderSetup) window.vfRenderSetup();
 }
 backfill();
 wasFasting = S.enabled ? isFasting() : null;
@@ -834,22 +1013,73 @@ else if (location.hash === '#history'){ switchView('hist'); }
 </body>
 </html>
 <script>
-/* Native bridge — present only inside the Android WebView shell.
-   Hands schedule changes to Android so alarms + notifications fire
-   even when the app is closed. */
+/* ===== Native bridge — only active inside the Android WebView shell ===== */
 (function(){
   if (!window.VitaFastNative) return;
-  var origSave = window.save;
-  window.save = function(){
-    origSave();
-    try { window.VitaFastNative.setSchedule(S.start, S.end, S.enabled, S.notify); } catch(e){}
-  };
+
+  function vfPushConfig(){
+    if (!window.VitaFastNative.setConfig) return;
+    try {
+      var cfg = {
+        enabled: S.enabled, notify: S.notify, milestones: S.milestones, ongoing: S.ongoing,
+        days: S.days.map(function(d){ return { start:d.start, end:d.end, active:d.active }; }),
+        phases: STAGES.filter(function(s){ return s.at >= 0 && s.at < 24; })
+                      .map(function(s){ return { at:s.at, name:s.name, icon:s.icon }; })
+      };
+      window.VitaFastNative.setConfig(JSON.stringify(cfg));
+    } catch(e){}
+  }
+
+  // every schedule/settings change funnels through save()
+  var _save = window.save;
+  window.save = function(){ _save(); vfPushConfig(); };
+
+  // native handles notification permission; alarms deliver in the background
   window.ensureNotifPermission = function(){
     try { window.VitaFastNative.requestNotificationPermission(); } catch(e){}
     return Promise.resolve(true);
   };
+
+  // reliability setup card
+  window.vfRenderSetup = function(){
+    var el = document.getElementById('setupCard');
+    if (!el || !window.VitaFastNative.getPermStatus) return;
+    var st = {}; try { st = JSON.parse(window.VitaFastNative.getPermStatus()); } catch(e){}
+    function row(ic, title, desc, ok, act){
+      return '<div class="setup-item"><span class="si-ico">' + ic + '</span>' +
+        '<div class="si-txt"><b>' + title + '</b><p>' + desc + '</p></div>' +
+        (ok ? '<span class="si-ok">✓</span>'
+            : '<button class="si-act" data-act="' + act + '">Fix</button>') + '</div>';
+    }
+    var allOk = st.notif && st.exact && st.battery;
+    el.hidden = false;
+    el.innerHTML =
+      '<div class="status-title" style="margin-bottom:6px">🔔 Notification reliability</div>' +
+      '<p class="note" style="margin:0 0 6px">' +
+        (allOk ? 'All set — fasting alerts will fire on time, even when the app is closed.'
+               : 'Grant these so alerts fire on time, even when VitaFast is closed.') + '</p>' +
+      row('📩','Notifications','Allow VitaFast to post alerts.', st.notif, 'notif') +
+      row('⏰','Exact alarms','Fire alerts at the precise minute.', st.exact, 'exact') +
+      row('🔋','Unrestricted battery','Stop the system pausing alarms.', st.battery, 'battery');
+    el.querySelectorAll('.si-act').forEach(function(b){
+      b.addEventListener('click', function(){
+        var a = b.dataset.act;
+        try {
+          if (a === 'notif') window.VitaFastNative.requestNotificationPermission();
+          else if (a === 'exact') window.VitaFastNative.openExactAlarmSettings();
+          else if (a === 'battery') window.VitaFastNative.openBatterySettings();
+        } catch(e){}
+      });
+    });
+  };
+
+  // refresh permission states when returning from system settings
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) window.vfRenderSetup(); });
+
   var n = document.querySelector('.note');
   if (n) n.textContent = 'Notifications are scheduled by Android and fire even when the app is closed.';
-  try { window.VitaFastNative.setSchedule(S.start, S.end, S.enabled, S.notify); } catch(e){}
+
+  window.vfRenderSetup();
+  vfPushConfig();
 })();
 </script>
