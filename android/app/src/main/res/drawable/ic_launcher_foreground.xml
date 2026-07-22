@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- open teal ring: the fasting arc -->
+    <path
+        android:pathData="M54,30 A24,24 0 1 1 33.2,42"
+        android:strokeColor="#2DD4BF"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"/>
+    <!-- start handle dot -->
+    <path
+        android:pathData="M33.2,42 m-5.5,0 a5.5,5.5 0 1 1 11,0 a5.5,5.5 0 1 1 -11,0"
+        android:fillColor="#22D3EE"/>
+</vector>
