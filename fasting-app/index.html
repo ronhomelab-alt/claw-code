@@ -87,9 +87,12 @@
     box-shadow:0 2px 10px rgba(0,0,0,.35);
   }
   .pill span{color:var(--ink-3);font-weight:600;margin-right:4px;font-size:10px;text-transform:uppercase}
-  .popIcon{transform-box:fill-box;transform-origin:center;animation:pop .45s cubic-bezier(.34,1.56,.64,1) both}
-  @keyframes pop{0%{transform:scale(.2);opacity:0}60%{transform:scale(1.28);opacity:1}100%{transform:scale(1)}}
-  @media (prefers-reduced-motion: reduce){.popIcon{animation:none}}
+  .arcLbl{font-size:9.5px;font-weight:700;letter-spacing:1.4px;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+  .popIcon{transform-box:fill-box;transform-origin:center;animation:pop .55s cubic-bezier(.34,1.8,.5,1) both}
+  @keyframes pop{0%{transform:scale(.1) rotate(-25deg);opacity:0}55%{transform:scale(1.45) rotate(8deg);opacity:1}75%{transform:scale(.9) rotate(-3deg)}100%{transform:scale(1) rotate(0)}}
+  .popRing{transform-box:fill-box;transform-origin:center;animation:popRing .7s ease-out both}
+  @keyframes popRing{0%{transform:scale(.6);opacity:.9}100%{transform:scale(2.6);opacity:0}}
+  @media (prefers-reduced-motion: reduce){.popIcon,.popRing{animation:none}.popRing{display:none}}
   .hint{color:var(--ink-3);font-size:12px;text-align:center;margin-top:10px}
 
   /* ============ STATUS ============ */
@@ -335,28 +338,28 @@ const durMin = () => ((S.end - S.start + DAY) % DAY) || DAY;
 
 /* ============================== STAGES ============================== */
 const STAGES = [
-  {at:0,  icon:'🍽️', color:'#38bdf8', name:'Fed state',
+  {at:0,  icon:'🍽️', short:'FED STATE', color:'#38bdf8', name:'Fed state',
     cause:'Insulin is elevated while your last meal digests.',
     effect:'The body stores energy; fat burning is on pause.'},
-  {at:4,  icon:'📉', color:'#facc15', name:'Blood sugar falls',
+  {at:4,  icon:'📉', short:'SUGAR DIP', color:'#facc15', name:'Blood sugar falls',
     cause:'Digestion finishes and insulin begins to drop.',
     effect:'Your body flips from storing energy to releasing it.'},
-  {at:8,  icon:'🔋', color:'#fb923c', name:'Glycogen tapping',
+  {at:8,  icon:'🔋', short:'GLYCOGEN', color:'#fb923c', name:'Glycogen tapping',
     cause:'Liver glycogen becomes the main fuel source.',
     effect:'Stored carbohydrate is steadily burned down.'},
-  {at:12, icon:'🔥', color:'#f87171', name:'Fat burning',
+  {at:12, icon:'🔥', short:'FAT BURN', color:'#f87171', name:'Fat burning',
     cause:'Glycogen runs low, so stored fat is mobilised.',
     effect:'Fatty acids become the primary fuel — the weight-loss zone.'},
-  {at:14, icon:'♻️', color:'#4ade80', name:'Autophagy',
+  {at:14, icon:'♻️', short:'AUTOPHAGY', color:'#4ade80', name:'Autophagy',
     cause:'Nutrient sensors switch the body into repair mode.',
     effect:'Cells recycle damaged components — deep cellular clean-up.'},
-  {at:16, icon:'🧪', color:'#a78bfa', name:'Ketosis deepens',
+  {at:16, icon:'🧪', short:'KETOSIS', color:'#a78bfa', name:'Ketosis deepens',
     cause:'The liver converts fat into ketones to fuel the brain.',
     effect:'Steadier energy, reduced hunger, sharper focus.'},
-  {at:18, icon:'💪', color:'#f472b6', name:'Growth-hormone peak',
+  {at:18, icon:'💪', short:'GH PEAK', color:'#f472b6', name:'Growth-hormone peak',
     cause:'GH secretion rises to protect lean muscle.',
     effect:'Muscle is preserved while fat loss and repair accelerate.'},
-  {at:24, icon:'🛡️', color:'#2dd4bf', name:'Deep renewal',
+  {at:24, icon:'🛡️', short:'RENEWAL', color:'#2dd4bf', name:'Deep renewal',
     cause:'A prolonged fast triggers immune-cell regeneration.',
     effect:'Peak autophagy and a reset of insulin sensitivity.'},
 ];
@@ -413,6 +416,16 @@ function pt(min, r){
   g.innerHTML = html;
 })();
 
+// Path for a curved text label. When `flip`, draw end→start so the text
+// sits upright on the lower half of the ring instead of upside-down.
+function arcLabelPath(sMin, eMin, r, flip){
+  const span = ((eMin - sMin + DAY) % DAY);
+  const large = span > 720 ? 1 : 0;
+  const s = flip ? eMin : sMin, e = flip ? sMin : eMin;
+  const p1 = pt(s, r), p2 = pt(e, r);
+  return `M ${p1.x} ${p1.y} A ${r} ${r} 0 ${large} ${flip ? 0 : 1} ${p2.x} ${p2.y}`;
+}
+
 function arcPath(sMin, eMin, r){
   const d = ((eMin - sMin + DAY) % DAY) || DAY;
   if (d >= DAY - 1) { // full circle
@@ -435,21 +448,40 @@ function renderDial(){
     if (endH > st.at) segs.push({ st, from: st.at, to: endH });
   }
   const GAP = 5; // minutes of ring left as breathing room between phases
+  const newUnlock = segs.length > (renderDial._segCount ?? segs.length);
   let svg = '';
+
+  // colored phase bands
   segs.forEach((g, i) => {
     const a = (S.start + g.from * 60 + (i > 0 ? GAP / 2 : 0)) % DAY;
     const b = (S.start + g.to * 60 - (i < segs.length - 1 ? GAP / 2 : 0) + DAY) % DAY;
     svg += `<path d="${arcPath(a, b, R)}" fill="none" stroke="${g.st.color}" stroke-width="18" stroke-linecap="butt"/>`;
   });
-  const newUnlock = segs.length > (renderDial._segCount ?? segs.length);
+
+  // curved phase labels riding just outside each band (skip very short arcs)
+  segs.forEach((g, i) => {
+    if (g.to - g.from < 1.2) return;
+    const a = (S.start + g.from * 60 + 4) % DAY;
+    const b = (S.start + g.to * 60 - 4 + DAY) % DAY;
+    const mid = (S.start + (g.from + g.to) / 2 * 60) % DAY;
+    const bottom = mid > 360 && mid < 1080;   // flip so text stays upright on the lower half
+    svg += `<path id="lp${i}" d="${arcLabelPath(a, b, R + 16, bottom)}" fill="none"/>` +
+      `<text class="arcLbl" fill="${g.st.color}"><textPath href="#lp${i}" startOffset="50%" text-anchor="middle">${g.st.short}</textPath></text>`;
+  });
+
+  // icon badges at each band midpoint; newest one pops in
   segs.forEach((g, i) => {
     const mid = (S.start + (g.from + g.to) / 2 * 60) % DAY;
     const p = pt(mid, R);
-    const popCls = (newUnlock && i === segs.length - 1) ? ' class="popIcon"' : '';
-    svg += `<g${popCls}><circle cx="${p.x}" cy="${p.y}" r="11.5" fill="#0b1f24" stroke="${g.st.color}" stroke-width="2"/>` +
+    const isNew = newUnlock && i === segs.length - 1;
+    const popCls = isNew ? ' class="popIcon"' : '';
+    if (isNew) {
+      svg += `<circle class="popRing" cx="${p.x}" cy="${p.y}" r="13" fill="none" stroke="${g.st.color}" stroke-width="2"/>`;
+    }
+    svg += `<g${popCls}><circle cx="${p.x}" cy="${p.y}" r="12" fill="#0b1f24" stroke="${g.st.color}" stroke-width="2.5"/>` +
       `<text x="${p.x}" y="${p.y + 0.5}" text-anchor="middle" dominant-baseline="central" font-size="11">${g.st.icon}</text></g>`;
   });
-  if (newUnlock && navigator.vibrate) navigator.vibrate(20);
+  if (newUnlock && navigator.vibrate) navigator.vibrate([0, 22, 40, 14]);
   renderDial._segCount = segs.length;
   $('#segArcs').innerHTML = svg;
 
