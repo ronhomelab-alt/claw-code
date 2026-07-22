@@ -1,0 +1,759 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#071518">
+<title>VitaFast — Fasting Schedule</title>
+<style>
+  :root{
+    --bg-0:#071518;
+    --bg-1:#0b1f24;
+    --card:#0f272d;
+    --card-2:#123138;
+    --line:rgba(45,212,191,.14);
+    --accent:#2dd4bf;
+    --accent-2:#22d3ee;
+    --accent-soft:rgba(45,212,191,.16);
+    --chart-teal:#0fa693;         /* validated for dark surface */
+    --ink:#f2f8f7;
+    --ink-2:#9fb6b4;
+    --ink-3:#5f7a78;
+    --hair:#1c3a40;
+    --amber:#fbbf24;
+    --radius:20px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html{background:var(--bg-0)}
+  html,body{height:100%}
+  body{
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    background:radial-gradient(120% 90% at 50% 0%, var(--bg-1) 0%, var(--bg-0) 60%);
+    color:var(--ink);
+    display:flex;justify-content:center;
+    min-height:100dvh;
+  }
+  #app{
+    width:100%;max-width:430px;
+    display:flex;flex-direction:column;
+    min-height:100dvh;
+    padding-bottom:calc(64px + env(safe-area-inset-bottom));
+  }
+  header{
+    display:flex;align-items:center;gap:10px;
+    padding:18px 20px 6px;
+  }
+  .logo{
+    width:34px;height:34px;border-radius:10px;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    display:grid;place-items:center;font-size:18px;
+    box-shadow:0 0 18px rgba(45,212,191,.35);
+  }
+  .brand{font-weight:700;font-size:19px;letter-spacing:.2px}
+  .brand em{font-style:normal;color:var(--accent)}
+  .greet{padding:2px 20px 14px}
+  .greet h1{font-size:21px;font-weight:700}
+  .greet p{color:var(--ink-2);font-size:13.5px;margin-top:2px}
+
+  main{padding:0 16px;display:flex;flex-direction:column;gap:14px}
+  main[hidden]{display:none}
+
+  .card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:16px;
+  }
+
+  /* ============ DIAL ============ */
+  .dial-card{padding:18px 12px 14px}
+  .dial-wrap{position:relative;width:min(84vw,330px);margin:0 auto;aspect-ratio:1}
+  .dial-wrap svg{width:100%;height:100%;display:block;touch-action:none}
+  .center{
+    position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;text-align:center;
+    pointer-events:none;
+  }
+  .center .dur{font-size:40px;font-weight:800;line-height:1}
+  .center .dur small{font-size:18px;font-weight:700;color:var(--ink-2)}
+  .center .sub{font-size:12px;color:var(--ink-2);margin-top:4px;letter-spacing:.4px;text-transform:uppercase}
+  .center .times{font-size:15px;font-weight:600;color:var(--accent);margin-top:6px}
+  .center .zone{font-size:12px;color:var(--ink-2);margin-top:4px}
+  .pill{
+    position:absolute;transform:translate(-50%,-50%);
+    background:var(--card-2);border:1px solid var(--line);
+    border-radius:999px;padding:3px 9px;font-size:11.5px;font-weight:700;
+    color:var(--ink);white-space:nowrap;pointer-events:none;
+    box-shadow:0 2px 10px rgba(0,0,0,.35);
+  }
+  .pill span{color:var(--ink-3);font-weight:600;margin-right:4px;font-size:10px;text-transform:uppercase}
+  .hint{color:var(--ink-3);font-size:12px;text-align:center;margin-top:10px}
+
+  /* ============ STATUS ============ */
+  .status-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .status-title{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--ink-3)}
+  .dot.on{background:var(--accent);box-shadow:0 0 10px rgba(45,212,191,.8)}
+  .switch{position:relative;width:46px;height:26px;flex:none}
+  .switch input{opacity:0;width:100%;height:100%;position:absolute;cursor:pointer;z-index:2}
+  .switch .tr{position:absolute;inset:0;border-radius:999px;background:var(--hair);transition:.2s}
+  .switch .th{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:var(--ink-2);transition:.2s}
+  .switch input:checked ~ .tr{background:var(--accent-soft);border:1px solid var(--line)}
+  .switch input:checked ~ .th{left:23px;background:var(--accent)}
+  .status-body{margin-top:10px;color:var(--ink-2);font-size:13.5px;line-height:1.5}
+  .status-body b{color:var(--ink);font-weight:700}
+  .bigcount{font-size:26px;font-weight:800;color:var(--ink);margin:4px 0 2px}
+  .bigcount i{font-style:normal;color:var(--accent)}
+  .bar{height:8px;border-radius:99px;background:var(--hair);overflow:hidden;margin-top:10px}
+  .bar>div{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .4s}
+  .rowline{display:flex;align-items:center;justify-content:space-between;margin-top:12px;padding-top:12px;border-top:1px solid var(--hair)}
+  .rowline .lbl{font-size:13.5px;color:var(--ink-2)}
+  .note{font-size:11.5px;color:var(--ink-3);margin-top:10px}
+
+  /* ============ MILESTONES ============ */
+  .chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px}
+  .chips::-webkit-scrollbar{display:none}
+  .chip{
+    flex:none;display:flex;align-items:center;gap:6px;
+    border:1px solid var(--hair);border-radius:999px;
+    padding:7px 12px;font-size:12.5px;font-weight:600;color:var(--ink-3);
+    background:transparent;transition:.25s;
+  }
+  .chip.hit{border-color:var(--line);background:var(--accent-soft);color:var(--ink)}
+
+  /* ============ STAGES ============ */
+  .stages h2,.hcard h2{font-size:15px;font-weight:700;margin-bottom:4px}
+  .stages .sub2{font-size:12.5px;color:var(--ink-2);margin-bottom:12px}
+  .stage{
+    display:grid;grid-template-columns:44px 1fr;gap:12px;
+    padding:11px 0;border-top:1px solid var(--hair);
+    opacity:.42;transition:opacity .25s;
+  }
+  .stage:first-of-type{border-top:none}
+  .stage.hit{opacity:1}
+  .stage .ico{
+    width:40px;height:40px;border-radius:12px;background:var(--card-2);
+    display:grid;place-items:center;font-size:19px;border:1px solid var(--hair);
+  }
+  .stage.hit .ico{border-color:var(--line);background:var(--accent-soft)}
+  .stage h3{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .stage h3 .at{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-soft);border-radius:6px;padding:1px 6px}
+  .stage p{font-size:12.5px;color:var(--ink-2);line-height:1.5;margin-top:3px}
+  .stage p b{color:var(--ink);font-weight:600}
+
+  /* ============ HISTORY ============ */
+  .tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:13px 14px}
+  .tile .lbl{font-size:11.5px;color:var(--ink-2)}
+  .tile .val{font-size:22px;font-weight:800;margin-top:3px}
+  .tile .val small{font-size:13px;color:var(--ink-2);font-weight:700}
+
+  .chart{margin-top:12px}
+  .chart-grid{position:relative;height:140px}
+  .gridline{position:absolute;left:28px;right:0;height:1px;background:var(--hair)}
+  .gridlbl{position:absolute;left:0;width:24px;text-align:right;font-size:10px;color:var(--ink-3);transform:translateY(-50%)}
+  .bars{position:absolute;left:28px;right:0;top:0;bottom:0;display:flex;align-items:flex-end;gap:3px}
+  .bslot{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative}
+  .b{
+    width:100%;max-width:22px;border-radius:4px 4px 0 0;
+    background:var(--chart-teal);min-height:2px;cursor:pointer;
+  }
+  .b.empty{background:var(--hair);height:2px!important}
+  .bval{position:absolute;top:-16px;font-size:10px;font-weight:700;color:var(--ink-2);white-space:nowrap}
+  .daylbls{display:flex;gap:3px;margin-left:28px;margin-top:6px}
+  .daylbls span{flex:1;text-align:center;font-size:10px;color:var(--ink-3)}
+  .tip{
+    position:absolute;top:-8px;left:50%;transform:translate(-50%,-100%);
+    background:var(--card-2);border:1px solid var(--line);border-radius:10px;
+    padding:6px 10px;font-size:12px;white-space:nowrap;z-index:5;
+    box-shadow:0 4px 16px rgba(0,0,0,.4);pointer-events:none;
+  }
+  .tip b{color:var(--ink)} .tip{color:var(--ink-2)}
+
+  .fastrow{display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-top:1px solid var(--hair)}
+  .fastrow:first-of-type{border-top:none}
+  .fastrow .d{font-size:13.5px;font-weight:600}
+  .fastrow .t{font-size:12px;color:var(--ink-2);margin-top:2px}
+  .fastrow .h{font-size:14px;font-weight:800;color:var(--ink)}
+  .fastrow .h em{font-style:normal;font-size:11px;color:var(--ink-2);font-weight:600}
+  .empty-state{text-align:center;color:var(--ink-2);font-size:13.5px;padding:26px 10px;line-height:1.6}
+  .linkbtn{
+    margin-top:10px;display:inline-block;border:1px solid var(--line);
+    background:var(--accent-soft);color:var(--ink);font-weight:700;font-size:13px;
+    border-radius:999px;padding:9px 16px;cursor:pointer;
+  }
+
+  /* ============ NAV ============ */
+  nav{
+    position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+    width:100%;max-width:430px;
+    display:flex;background:rgba(9,26,30,.92);backdrop-filter:blur(12px);
+    border-top:1px solid var(--hair);
+    padding:8px 0 calc(8px + env(safe-area-inset-bottom));
+  }
+  nav button{
+    flex:1;background:none;border:none;color:var(--ink-3);
+    font-size:11px;font-weight:600;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:3px;font-family:inherit;
+  }
+  nav button .nico{font-size:20px}
+  nav button.on{color:var(--accent)}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">🌿</div>
+    <div class="brand">Vita<em>Fast</em></div>
+  </header>
+  <div class="greet">
+    <h1 id="greeting">Good Morning!</h1>
+    <p>Set your fasting schedule — it runs automatically.</p>
+  </div>
+
+  <!-- ================= FAST VIEW ================= -->
+  <main id="view-fast">
+    <section class="card dial-card">
+      <div class="dial-wrap" id="dialWrap">
+        <svg id="dial" viewBox="0 0 340 340" aria-label="24-hour fasting schedule dial">
+          <defs>
+            <linearGradient id="arcGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#2dd4bf"/>
+              <stop offset="100%" stop-color="#22d3ee"/>
+            </linearGradient>
+          </defs>
+          <circle cx="170" cy="170" r="128" fill="none" stroke="#132e34" stroke-width="18"/>
+          <g id="ticks"></g>
+          <path id="arcGlow" fill="none" stroke="rgba(45,212,191,.35)" stroke-width="24" stroke-linecap="round"/>
+          <path id="arc" fill="none" stroke="url(#arcGrad)" stroke-width="18" stroke-linecap="round"/>
+          <path id="elapsedArc" fill="none" stroke="#fbbf24" stroke-width="4" stroke-linecap="round" opacity="0"/>
+          <g id="hStart" style="cursor:grab">
+            <circle r="26" fill="transparent"/>
+            <circle r="15" fill="#0b1f24" stroke="#2dd4bf" stroke-width="3"/>
+            <text text-anchor="middle" dominant-baseline="central" font-size="13">🌙</text>
+          </g>
+          <g id="hEnd" style="cursor:grab">
+            <circle r="26" fill="transparent"/>
+            <circle r="15" fill="#0b1f24" stroke="#22d3ee" stroke-width="3"/>
+            <text text-anchor="middle" dominant-baseline="central" font-size="13">☀️</text>
+          </g>
+        </svg>
+        <div class="center">
+          <div class="dur" id="durTxt">17<small>h</small></div>
+          <div class="sub">Fast Duration</div>
+          <div class="times" id="timesTxt">6:00 PM – 11:00 AM</div>
+          <div class="zone" id="zoneTxt">Fasting Zone (Autophagy)</div>
+        </div>
+        <div class="pill" id="pillStart"><span>Start</span>6:00 PM</div>
+        <div class="pill" id="pillEnd"><span>End</span>11:00 AM</div>
+      </div>
+      <p class="hint">Drag 🌙 to set when fasting starts, ☀️ to set when it ends</p>
+    </section>
+
+    <section class="card">
+      <div class="status-head">
+        <div class="status-title"><span class="dot" id="schedDot"></span> Automatic schedule</div>
+        <label class="switch"><input type="checkbox" id="schedToggle"><span class="tr"></span><span class="th"></span></label>
+      </div>
+      <div class="status-body" id="statusBody">
+        Turn on the schedule and VitaFast handles the rest — no start or stop
+        buttons. It tracks every fast and notifies you at each transition.
+      </div>
+      <div class="bar" id="progWrap" style="display:none"><div id="progFill" style="width:0%"></div></div>
+      <div class="rowline">
+        <div class="lbl">🔔 Notify me when a fast begins &amp; ends</div>
+        <label class="switch"><input type="checkbox" id="notifToggle"><span class="tr"></span><span class="th"></span></label>
+      </div>
+      <p class="note">Prototype note: notifications fire while this page is open.
+      The Android build will deliver them in the background via exact alarms.</p>
+    </section>
+
+    <section class="chips" id="chips"></section>
+
+    <section class="card stages">
+      <h2>What your fast unlocks</h2>
+      <p class="sub2" id="stagesSub">Cause &amp; effect at each hour — extend the arc to unlock more.</p>
+      <div id="stageList"></div>
+    </section>
+  </main>
+
+  <!-- ================= HISTORY VIEW ================= -->
+  <main id="view-history" hidden>
+    <div class="tiles">
+      <div class="tile"><div class="lbl">🔥 Current streak</div><div class="val" id="tStreak">0 <small>days</small></div></div>
+      <div class="tile"><div class="lbl">✅ Fasts completed</div><div class="val" id="tTotal">0</div></div>
+      <div class="tile"><div class="lbl">⏱️ Average fast</div><div class="val" id="tAvg">–</div></div>
+      <div class="tile"><div class="lbl">🏆 Longest fast</div><div class="val" id="tMax">–</div></div>
+    </div>
+
+    <section class="card hcard">
+      <h2>Hours fasted — last 14 days</h2>
+      <div class="chart">
+        <div class="chart-grid" id="chartGrid"></div>
+        <div class="daylbls" id="dayLbls"></div>
+      </div>
+    </section>
+
+    <section class="card hcard">
+      <h2>Fast log</h2>
+      <div id="fastLog"></div>
+    </section>
+  </main>
+
+  <nav>
+    <button id="navFast" class="on"><span class="nico">⏳</span>Fast</button>
+    <button id="navHist"><span class="nico">📊</span>History</button>
+  </nav>
+</div>
+
+<script>
+'use strict';
+/* ============================== STATE ============================== */
+const KEY = 'vitafast.v1';
+const DAY = 1440;
+const defaults = {
+  start: 18 * 60,        // 6:00 PM
+  end: 11 * 60,          // 11:00 AM
+  enabled: false,
+  notify: false,
+  activatedAt: null,     // ms timestamp when schedule was switched on
+  lastLogged: null,      // ms timestamp of last auto-logged fast end
+  history: []            // [{start:ms, end:ms, hours:number}]
+};
+let S = load();
+function load(){
+  try { return Object.assign({}, defaults, JSON.parse(localStorage.getItem(KEY)) || {}); }
+  catch { return { ...defaults }; }
+}
+function save(){ localStorage.setItem(KEY, JSON.stringify(S)); }
+
+const $ = s => document.querySelector(s);
+const CX = 170, CY = 170, R = 128;
+const durMin = () => ((S.end - S.start + DAY) % DAY) || DAY;
+
+/* ============================== STAGES ============================== */
+const STAGES = [
+  {at:0,  icon:'🍽️', name:'Fed state',
+    cause:'Insulin is elevated while your last meal digests.',
+    effect:'The body stores energy; fat burning is on pause.'},
+  {at:4,  icon:'📉', name:'Blood sugar falls',
+    cause:'Digestion finishes and insulin begins to drop.',
+    effect:'Your body flips from storing energy to releasing it.'},
+  {at:8,  icon:'🔋', name:'Glycogen tapping',
+    cause:'Liver glycogen becomes the main fuel source.',
+    effect:'Stored carbohydrate is steadily burned down.'},
+  {at:12, icon:'🔥', name:'Fat burning',
+    cause:'Glycogen runs low, so stored fat is mobilised.',
+    effect:'Fatty acids become the primary fuel — the weight-loss zone.'},
+  {at:14, icon:'♻️', name:'Autophagy',
+    cause:'Nutrient sensors switch the body into repair mode.',
+    effect:'Cells recycle damaged components — deep cellular clean-up.'},
+  {at:16, icon:'🧪', name:'Ketosis deepens',
+    cause:'The liver converts fat into ketones to fuel the brain.',
+    effect:'Steadier energy, reduced hunger, sharper focus.'},
+  {at:18, icon:'💪', name:'Growth-hormone peak',
+    cause:'GH secretion rises to protect lean muscle.',
+    effect:'Muscle is preserved while fat loss and repair accelerate.'},
+  {at:24, icon:'🛡️', name:'Deep renewal',
+    cause:'A prolonged fast triggers immune-cell regeneration.',
+    effect:'Peak autophagy and a reset of insulin sensitivity.'},
+];
+const CHIP_MILESTONES = [
+  {at:12, label:'🔥 Fat Burning (12h+)'},
+  {at:14, label:'♻️ Autophagy (14h+)'},
+  {at:16, label:'🧪 Ketosis (16h+)'},
+  {at:18, label:'💪 GH Peak (18h+)'},
+];
+function currentZone(hours){
+  let z = STAGES[0];
+  for (const s of STAGES) if (hours >= s.at) z = s;
+  return z;
+}
+
+/* ============================== TIME HELPERS ============================== */
+function fmt(min){
+  min = ((min % DAY) + DAY) % DAY;
+  let h = Math.floor(min / 60), m = min % 60;
+  const ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${String(m).padStart(2,'0')} ${ap}`;
+}
+function fmtDur(min){
+  const h = Math.floor(min / 60), m = min % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+function dateKey(d){ return d.toISOString().slice(0,10); }
+function pt(min, r){
+  const a = (min / DAY) * 2 * Math.PI;
+  return { x: CX + r * Math.sin(a), y: CY - r * Math.cos(a) };
+}
+
+/* ============================== DIAL ============================== */
+(function buildTicks(){
+  const g = $('#ticks');
+  let html = '';
+  for (let h = 0; h < 24; h++){
+    const min = h * 60;
+    const isMajor = h % 4 === 0;
+    const p1 = pt(min, isMajor ? 112 : 114), p2 = pt(min, 118);
+    html += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}"
+      stroke="${isMajor ? '#3d6067' : '#22454c'}" stroke-width="${isMajor ? 2 : 1}"/>`;
+    if (isMajor){
+      const pl = pt(min, 100);
+      html += `<text x="${pl.x}" y="${pl.y}" text-anchor="middle" dominant-baseline="central"
+        font-size="11" font-weight="600" fill="#5f7a78">${h}</text>`;
+    }
+  }
+  g.innerHTML = html;
+})();
+
+function arcPath(sMin, eMin, r){
+  const d = ((eMin - sMin + DAY) % DAY) || DAY;
+  if (d >= DAY - 1) { // full circle
+    const p = pt(sMin, r), q = pt(sMin + 720, r);
+    return `M ${p.x} ${p.y} A ${r} ${r} 0 1 1 ${q.x} ${q.y} A ${r} ${r} 0 1 1 ${p.x} ${p.y}`;
+  }
+  const p1 = pt(sMin, r), p2 = pt(eMin, r);
+  return `M ${p1.x} ${p1.y} A ${r} ${r} 0 ${d > 720 ? 1 : 0} 1 ${p2.x} ${p2.y}`;
+}
+
+function renderDial(){
+  const d = arcPath(S.start, S.end, R);
+  $('#arc').setAttribute('d', d);
+  $('#arcGlow').setAttribute('d', d);
+  const ps = pt(S.start, R), pe = pt(S.end, R);
+  $('#hStart').setAttribute('transform', `translate(${ps.x},${ps.y})`);
+  $('#hEnd').setAttribute('transform', `translate(${pe.x},${pe.y})`);
+
+  const dm = durMin(), hours = dm / 60;
+  const h = Math.floor(hours), m = dm % 60;
+  $('#durTxt').innerHTML = m ? `${h}<small>h</small> ${m}<small>m</small>` : `${h}<small>h</small>`;
+  $('#timesTxt').textContent = `${fmt(S.start)} – ${fmt(S.end)}`;
+  $('#zoneTxt').textContent = `Fasting Zone (${currentZone(hours).name})`;
+
+  for (const [id, min] of [['#pillStart', S.start], ['#pillEnd', S.end]]){
+    const pp = pt(min, R + 30);
+    const el = $(id);
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+    el.style.left = clamp(pp.x / 340 * 100, 15, 85) + '%';
+    el.style.top  = clamp(pp.y / 340 * 100, 5, 95) + '%';
+    el.childNodes[1].nodeValue = fmt(min);
+  }
+
+  renderChips(hours);
+  renderStages(hours);
+}
+
+function renderChips(hours){
+  $('#chips').innerHTML = CHIP_MILESTONES.map(c =>
+    `<div class="chip ${hours >= c.at ? 'hit' : ''}">${c.label}</div>`).join('');
+}
+function renderStages(hours){
+  const zone = currentZone(hours);
+  $('#stageList').innerHTML = STAGES.map(s => `
+    <div class="stage ${hours >= s.at ? 'hit' : ''}">
+      <div class="ico">${s.icon}</div>
+      <div>
+        <h3>${s.name} <span class="at">${s.at === 0 ? '0–4h' : s.at + 'h+'}</span></h3>
+        <p><b>Cause:</b> ${s.cause}<br><b>Effect:</b> ${s.effect}</p>
+      </div>
+    </div>`).join('');
+  const next = STAGES.find(s => s.at > hours);
+  $('#stagesSub').textContent = next
+    ? `You've unlocked ${zone.name}. Extend by ${fmtDur(Math.round((next.at - hours) * 60))} to reach ${next.name}.`
+    : `Maximum zone unlocked — ${zone.name}.`;
+}
+
+/* ---------- dragging ---------- */
+(function initDrag(){
+  const svg = $('#dial');
+  let active = null;
+  function toMin(ev){
+    const r = svg.getBoundingClientRect();
+    const dx = ev.clientX - (r.left + r.width / 2);
+    const dy = ev.clientY - (r.top + r.height / 2);
+    let ang = Math.atan2(dx, -dy);               // 0 at top, clockwise
+    if (ang < 0) ang += 2 * Math.PI;
+    let min = Math.round((ang / (2 * Math.PI)) * DAY / 15) * 15;
+    return min % DAY;
+  }
+  function down(which){ return ev => {
+    active = which; ev.preventDefault();
+    svg.setPointerCapture(ev.pointerId);
+  };}
+  $('#hStart').addEventListener('pointerdown', down('start'));
+  $('#hEnd').addEventListener('pointerdown', down('end'));
+  svg.addEventListener('pointermove', ev => {
+    if (!active) return;
+    const min = toMin(ev);
+    const other = active === 'start' ? S.end : S.start;
+    if (Math.abs(min - other) < 15 || Math.abs(min - other) > DAY - 15) return; // keep ≥15m apart
+    if (S[active] !== min){
+      S[active] = min;
+      if (navigator.vibrate) navigator.vibrate(4);
+      renderDial(); renderStatus();
+    }
+  });
+  const up = () => { if (active){ active = null; save(); backfill(); renderAll(); } };
+  svg.addEventListener('pointerup', up);
+  svg.addEventListener('pointercancel', up);
+})();
+
+/* ============================== SCHEDULE ENGINE ============================== */
+function nowMin(){ const n = new Date(); return n.getHours() * 60 + n.getMinutes(); }
+function isFasting(){ return ((nowMin() - S.start + DAY) % DAY) < durMin(); }
+
+function nextBoundary(min){ // next Date at given minutes-of-day
+  const n = new Date(), t = new Date(n);
+  t.setHours(Math.floor(min / 60), min % 60, 0, 0);
+  if (t <= n) t.setDate(t.getDate() + 1);
+  return t;
+}
+function prevBoundary(min){
+  const n = new Date(), t = new Date(n);
+  t.setHours(Math.floor(min / 60), min % 60, 0, 0);
+  if (t > n) t.setDate(t.getDate() - 1);
+  return t;
+}
+
+function renderStatus(){
+  const dot = $('#schedDot'), body = $('#statusBody');
+  $('#schedToggle').checked = S.enabled;
+  $('#notifToggle').checked = S.notify;
+  dot.classList.toggle('on', S.enabled);
+  const progWrap = $('#progWrap'), elapsedArc = $('#elapsedArc');
+
+  if (!S.enabled){
+    body.innerHTML = `Turn on the schedule and VitaFast handles the rest — no start
+      or stop buttons. Every fast is tracked automatically and you're notified at
+      each transition.`;
+    progWrap.style.display = 'none';
+    elapsedArc.setAttribute('opacity', '0');
+    return;
+  }
+  if (isFasting()){
+    const started = prevBoundary(S.start);
+    const ends = nextBoundary(S.end);
+    const elapsed = Math.floor((Date.now() - started) / 60000);
+    const remain = Math.max(0, Math.floor((ends - Date.now()) / 60000));
+    const pct = Math.min(100, elapsed / durMin() * 100);
+    const zone = currentZone(elapsed / 60);
+    body.innerHTML = `<b>Fasting in progress</b> ${zone.icon} ${zone.name} zone
+      <div class="bigcount"><i>${fmtDur(elapsed)}</i> elapsed</div>
+      ${fmtDur(remain)} remaining · ends <b>${fmt(S.end)}</b>`;
+    progWrap.style.display = 'block';
+    $('#progFill').style.width = pct + '%';
+    elapsedArc.setAttribute('d', arcPath(S.start, nowMin(), 112));
+    elapsedArc.setAttribute('opacity', '.9');
+  } else {
+    const starts = nextBoundary(S.start);
+    const inMin = Math.floor((starts - Date.now()) / 60000);
+    body.innerHTML = `<b>Eating window</b> 🍽️
+      <div class="bigcount">Next fast in <i>${fmtDur(inMin)}</i></div>
+      Fasting begins automatically at <b>${fmt(S.start)}</b>.`;
+    progWrap.style.display = 'none';
+    elapsedArc.setAttribute('opacity', '0');
+  }
+}
+
+/* ---------- auto-logging (no manual start/stop) ---------- */
+function backfill(){
+  if (!S.enabled || !S.activatedAt) return;
+  const now = Date.now(), dm = durMin();
+  const from = Math.max(S.activatedAt, S.lastLogged || 0);
+  const d0 = new Date(S.activatedAt); d0.setHours(0,0,0,0);
+  let added = false;
+  for (let k = 0; k < 120; k++){
+    const day = new Date(d0); day.setDate(day.getDate() + k);
+    const fs = new Date(day); fs.setHours(Math.floor(S.start/60), S.start%60, 0, 0);
+    const fe = fs.getTime() + dm * 60000;
+    if (fs.getTime() > now) break;
+    if (fs.getTime() >= S.activatedAt && fe <= now && fe > from){
+      S.history.push({ start: fs.getTime(), end: fe, hours: dm / 60 });
+      S.lastLogged = fe;
+      added = true;
+    }
+  }
+  if (added){ S.history.sort((a,b) => a.end - b.end); save(); }
+}
+
+/* ---------- notifications ---------- */
+let wasFasting = null;
+async function ensureNotifPermission(){
+  if (!('Notification' in window)) return false;
+  if (Notification.permission === 'granted') return true;
+  return (await Notification.requestPermission()) === 'granted';
+}
+function notify(title, body){
+  if (!S.notify || !('Notification' in window) || Notification.permission !== 'granted') return;
+  try { new Notification(title, { body, icon: undefined }); } catch {}
+}
+function tick(){
+  if (S.enabled){
+    const f = isFasting();
+    if (wasFasting !== null && f !== wasFasting){
+      if (f) notify('🌙 Fast started', `Your ${fmtDur(durMin())} fast has begun. It ends at ${fmt(S.end)}.`);
+      else { notify('☀️ Fast complete!', `You fasted ${fmtDur(durMin())}. Enjoy your eating window.`); backfill(); renderHistory(); }
+    }
+    wasFasting = f;
+  }
+  renderStatus();
+  renderGreeting();
+}
+
+/* ============================== HISTORY ============================== */
+function renderHistory(){
+  const H = S.history;
+  // tiles
+  $('#tTotal').textContent = H.length;
+  if (H.length){
+    const avg = H.reduce((a,r) => a + r.hours, 0) / H.length;
+    const max = Math.max(...H.map(r => r.hours));
+    $('#tAvg').innerHTML = `${avg.toFixed(1)}<small>h</small>`;
+    $('#tMax').innerHTML = `${fmtDur(Math.round(max * 60))}`;
+  } else {
+    $('#tAvg').textContent = '–'; $('#tMax').textContent = '–';
+  }
+  // streak: consecutive days (ending today or yesterday) with a completed fast
+  const days = new Set(H.map(r => dateKey(new Date(r.end))));
+  let streak = 0;
+  const c = new Date();
+  if (!days.has(dateKey(c))) c.setDate(c.getDate() - 1);
+  while (days.has(dateKey(c))){ streak++; c.setDate(c.getDate() - 1); }
+  $('#tStreak').innerHTML = `${streak} <small>day${streak === 1 ? '' : 's'}</small>`;
+
+  renderChart(H);
+
+  // log list
+  const log = $('#fastLog');
+  if (!H.length){
+    log.innerHTML = `<div class="empty-state">No fasts recorded yet.<br>
+      Turn on the automatic schedule and completed fasts will appear here on their own.<br>
+      <button class="linkbtn" id="demoBtn">Load sample data</button></div>`;
+    $('#demoBtn').addEventListener('click', seedDemo);
+    return;
+  }
+  log.innerHTML = [...H].reverse().slice(0, 30).map(r => {
+    const e = new Date(r.end), s = new Date(r.start);
+    const dstr = e.toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' });
+    const t = `${s.getHours() % 12 || 12}:${String(s.getMinutes()).padStart(2,'0')} ${s.getHours() >= 12 ? 'PM' : 'AM'}
+       → ${e.getHours() % 12 || 12}:${String(e.getMinutes()).padStart(2,'0')} ${e.getHours() >= 12 ? 'PM' : 'AM'}`;
+    return `<div class="fastrow">
+      <div><div class="d">${dstr}</div><div class="t">${t}</div></div>
+      <div class="h">${fmtDur(Math.round(r.hours * 60))} <em>fasted</em></div>
+    </div>`;
+  }).join('');
+}
+
+function renderChart(H){
+  const grid = $('#chartGrid'), lbls = $('#dayLbls');
+  const byDay = {};
+  for (const r of H){
+    const k = dateKey(new Date(r.end));
+    byDay[k] = Math.max(byDay[k] || 0, r.hours);
+  }
+  const days = [];
+  for (let i = 13; i >= 0; i--){
+    const d = new Date(); d.setDate(d.getDate() - i);
+    days.push({ key: dateKey(d), lbl: 'SMTWTFS'[d.getDay()], hours: byDay[dateKey(d)] || 0, isToday: i === 0 });
+  }
+  const MAXH = 24;
+  let html = '';
+  for (const gv of [0, 8, 16, 24]){
+    const top = (1 - gv / MAXH) * 100;
+    html += `<div class="gridline" style="top:${top}%"></div>
+             <div class="gridlbl" style="top:${top}%">${gv}</div>`;
+  }
+  const maxDay = Math.max(...days.map(d => d.hours));
+  html += `<div class="bars">` + days.map(d => {
+    const hpct = Math.min(100, d.hours / MAXH * 100);
+    const showVal = d.hours > 0 && (d.hours === maxDay || d.isToday);
+    return `<div class="bslot" data-key="${d.key}" data-h="${d.hours}">
+      ${showVal ? `<span class="bval">${Math.round(d.hours)}h</span>` : ''}
+      <div class="b ${d.hours ? '' : 'empty'}" style="height:${Math.max(hpct, 1.5)}%"></div>
+    </div>`;
+  }).join('') + `</div>`;
+  grid.innerHTML = html;
+  lbls.innerHTML = days.map(d => `<span>${d.lbl}</span>`).join('');
+
+  // tooltip on tap/hover
+  let tipEl = null, tipTimer = null;
+  grid.addEventListener('pointerdown', ev => {
+    const slot = ev.target.closest('.bslot');
+    if (tipEl){ tipEl.remove(); tipEl = null; clearTimeout(tipTimer); }
+    if (!slot || !(+slot.dataset.h)) return;
+    const d = new Date(slot.dataset.key + 'T12:00:00');
+    tipEl = document.createElement('div');
+    tipEl.className = 'tip';
+    tipEl.innerHTML = `<b>${d.toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric'})}</b>
+      — ${fmtDur(Math.round(+slot.dataset.h * 60))}`;
+    slot.appendChild(tipEl);
+    tipTimer = setTimeout(() => { if (tipEl){ tipEl.remove(); tipEl = null; } }, 2500);
+  });
+}
+
+function seedDemo(){
+  const dm = durMin();
+  const recs = [];
+  for (let i = 21; i >= 1; i--){
+    if (i === 9) continue; // one missed day, so the streak looks real
+    const d = new Date(); d.setDate(d.getDate() - i);
+    d.setHours(Math.floor(S.start/60), S.start%60, 0, 0);
+    const jitter = (Math.random() * 90 - 30) * 60000; // −30m … +60m
+    const end = d.getTime() + dm * 60000 + jitter;
+    recs.push({ start: d.getTime(), end, hours: (end - d.getTime()) / 3600000 });
+  }
+  S.history = recs; S.lastLogged = recs[recs.length - 1].end;
+  save(); renderHistory();
+}
+
+/* ============================== UI WIRING ============================== */
+$('#schedToggle').addEventListener('change', async ev => {
+  S.enabled = ev.target.checked;
+  if (S.enabled){
+    S.activatedAt = S.activatedAt || Date.now();
+    wasFasting = isFasting();
+  }
+  save(); backfill(); renderAll();
+});
+$('#notifToggle').addEventListener('change', async ev => {
+  if (ev.target.checked){
+    const ok = await ensureNotifPermission();
+    if (!ok){ ev.target.checked = false; return; }
+  }
+  S.notify = ev.target.checked; save();
+});
+
+$('#navFast').addEventListener('click', () => switchView('fast'));
+$('#navHist').addEventListener('click', () => switchView('hist'));
+function switchView(v){
+  $('#view-fast').hidden = v !== 'fast';
+  $('#view-history').hidden = v !== 'hist';
+  $('#navFast').classList.toggle('on', v === 'fast');
+  $('#navHist').classList.toggle('on', v === 'hist');
+  if (v === 'hist') renderHistory();
+}
+
+function renderGreeting(){
+  const h = new Date().getHours();
+  $('#greeting').textContent =
+    h < 5 ? 'Good Night! 🌙' : h < 12 ? 'Good Morning! ☀️' : h < 18 ? 'Good Afternoon! 👋' : 'Good Evening! 🌆';
+}
+
+function renderAll(){
+  renderGreeting();
+  renderDial();
+  renderStatus();
+  renderHistory();
+}
+backfill();
+wasFasting = S.enabled ? isFasting() : null;
+renderAll();
+setInterval(tick, 15000);
+
+// dev/demo deep links: #history opens the history tab, #demo also seeds sample data
+if (location.hash === '#demo'){ seedDemo(); switchView('hist'); }
+else if (location.hash === '#history'){ switchView('hist'); }
+</script>
+</body>
+</html>
