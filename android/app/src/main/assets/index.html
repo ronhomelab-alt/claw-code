@@ -144,16 +144,20 @@
   .rowline .lbl{font-size:13.5px;color:var(--ink-2)}
   .note{font-size:11.5px;color:var(--ink-3);margin-top:10px}
 
-  /* ============ MILESTONES ============ */
-  .chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px}
-  .chips::-webkit-scrollbar{display:none}
-  .chip{
-    flex:none;display:flex;align-items:center;gap:6px;
-    border:1px solid var(--hair);border-radius:999px;
-    padding:7px 12px;font-size:12.5px;font-weight:600;color:var(--ink-3);
-    background:transparent;transition:.25s;
-  }
-  .chip.hit{border-color:var(--line);background:var(--accent-soft);color:var(--ink)}
+  /* ============ BENEFIT TIMELINE ============ */
+  .tlwrap{position:relative;margin-top:10px}
+  .tlrow{display:grid;grid-template-columns:97px 1fr 56px;align-items:center;gap:8px;padding:4.5px 0}
+  .tlname{font-size:10px;font-weight:700;letter-spacing:.5px;color:var(--ink-2);
+    display:flex;align-items:center;gap:5px;white-space:nowrap;overflow:hidden}
+  .tlname .tlico{font-size:12px}
+  .tltrack{position:relative;height:13px;border-radius:7px;background:rgba(255,255,255,.035)}
+  .tlbar{position:absolute;top:0;bottom:0;border-radius:7px;min-width:13px}
+  .tlbar.runs{border-radius:7px 3px 3px 7px}
+  .tldur{font-size:11px;font-weight:700;color:var(--ink-2);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .tlaxis{display:flex;justify-content:space-between;margin-top:4px;
+    padding-left:105px;padding-right:64px;font-size:9.5px;color:var(--ink-3)}
+  #tlNow{position:absolute;top:0;bottom:0;width:2px;border-radius:2px;background:var(--amber);
+    box-shadow:0 0 8px rgba(251,191,36,.7);display:none;pointer-events:none}
 
   /* ============ STAGES ============ */
   .stages h2,.hcard h2{font-size:15px;font-weight:700;margin-bottom:4px}
@@ -357,7 +361,16 @@
 
     <section class="card" id="setupCard" hidden></section>
 
-    <section class="chips" id="chips"></section>
+    <section class="card">
+      <h2 style="font-size:15px;font-weight:700">Benefit timeline</h2>
+      <p class="sub2" id="tlSub" style="font-size:12.5px;color:var(--ink-2);margin-top:2px">
+        Phases overlap — once a benefit switches on, it stays active until you break the fast.</p>
+      <div class="tlwrap" id="tlWrap">
+        <div id="tlRows"></div>
+        <div id="tlNow"></div>
+      </div>
+      <div class="tlaxis" id="tlAxis"></div>
+    </section>
 
     <section class="card stages">
       <h2>What your fast unlocks</h2>
@@ -481,28 +494,28 @@ function applyPreset(h){
 
 /* ============================== STAGES ============================== */
 const STAGES = [
-  {at:0,  icon:'🍽️', short:'FED STATE', color:'#38bdf8', name:'Fed state',
+  {at:0,  icon:'🍽️', short:'FED STATE', color:'#38bdf8', persists:false, name:'Fed state',
     cause:'Insulin is elevated while your last meal digests.',
     effect:'The body stores energy; fat burning is on pause.'},
-  {at:4,  icon:'📉', short:'SUGAR DIP', color:'#facc15', name:'Blood sugar falls',
+  {at:4,  icon:'📉', short:'SUGAR DIP', color:'#facc15', persists:false, name:'Blood sugar falls',
     cause:'Digestion finishes and insulin begins to drop.',
     effect:'Your body flips from storing energy to releasing it.'},
-  {at:8,  icon:'🔋', short:'GLYCOGEN', color:'#fb923c', name:'Glycogen tapping',
+  {at:8,  icon:'🔋', short:'GLYCOGEN', color:'#fb923c', persists:false, name:'Glycogen tapping',
     cause:'Liver glycogen becomes the main fuel source.',
     effect:'Stored carbohydrate is steadily burned down.'},
-  {at:12, icon:'🔥', short:'FAT BURN', color:'#f87171', name:'Fat burning',
+  {at:12, icon:'🔥', short:'FAT BURN', color:'#f87171', persists:true, name:'Fat burning',
     cause:'Glycogen runs low, so stored fat is mobilised.',
     effect:'Fatty acids become the primary fuel — the weight-loss zone.'},
-  {at:14, icon:'♻️', short:'AUTOPHAGY', color:'#4ade80', name:'Autophagy',
+  {at:14, icon:'♻️', short:'AUTOPHAGY', color:'#4ade80', persists:true, name:'Autophagy',
     cause:'Nutrient sensors switch the body into repair mode.',
     effect:'Cells recycle damaged components — deep cellular clean-up.'},
-  {at:16, icon:'🧪', short:'KETOSIS', color:'#a78bfa', name:'Ketosis deepens',
+  {at:16, icon:'🧪', short:'KETOSIS', color:'#a78bfa', persists:true, name:'Ketosis deepens',
     cause:'The liver converts fat into ketones to fuel the brain.',
     effect:'Steadier energy, reduced hunger, sharper focus.'},
-  {at:18, icon:'💪', short:'GH PEAK', color:'#f472b6', name:'Growth-hormone peak',
+  {at:18, icon:'💪', short:'GH PEAK', color:'#f472b6', persists:true, name:'Growth-hormone peak',
     cause:'GH secretion rises to protect lean muscle.',
     effect:'Muscle is preserved while fat loss and repair accelerate.'},
-  {at:24, icon:'🛡️', short:'RENEWAL', color:'#2dd4bf', name:'Deep renewal',
+  {at:24, icon:'🛡️', short:'RENEWAL', color:'#2dd4bf', persists:true, name:'Deep renewal',
     cause:'A prolonged fast triggers immune-cell regeneration.',
     effect:'Peak autophagy and a reset of insulin sensitivity.'},
 ];
@@ -510,12 +523,6 @@ function hexA(hex, a){
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
 }
-const CHIP_MILESTONES = [
-  {at:12, label:'🔥 Fat Burning (12h+)'},
-  {at:14, label:'♻️ Autophagy (14h+)'},
-  {at:16, label:'🧪 Ketosis (16h+)'},
-  {at:18, label:'💪 GH Peak (18h+)'},
-];
 function currentZone(hours){
   let z = STAGES[0];
   for (const s of STAGES) if (hours >= s.at) z = s;
@@ -652,17 +659,38 @@ function renderDial(){
     el.childNodes[1].nodeValue = fmt(min);
   }
 
-  renderChips(hours);
+  renderTimeline(hours);
   renderStages(hours);
 }
 
-function renderChips(hours){
-  $('#chips').innerHTML = CHIP_MILESTONES.map(c => {
-    const st = STAGES.find(s => s.at === c.at);
-    const hit = hours >= c.at;
-    const style = hit ? ` style="border-color:${st.color};background:${hexA(st.color,.14)};color:var(--ink)"` : '';
-    return `<div class="chip ${hit ? 'hit' : ''}"${style}>${c.label}</div>`;
-  }).join('');
+/* Benefit timeline (mini-Gantt): each unlocked phase is a row whose bar runs
+   from its onset to where it truly ends — early phases hand off to the next,
+   persistent benefits run to the end of the fast. Flush right edges = the
+   stack of benefits you finish the fast with. */
+function renderTimeline(durH){
+  const rows = [];
+  for (let i = 0; i < STAGES.length; i++){
+    const st = STAGES[i];
+    if (st.at >= durH) break;
+    const nextAt = i + 1 < STAGES.length ? STAGES[i + 1].at : 24;
+    const endH = st.persists ? durH : Math.min(nextAt, durH);
+    rows.push({ st, from: st.at, to: endH, runs: st.persists && endH >= durH });
+  }
+  const stacked = rows.filter(r => r.runs).length;
+  $('#tlSub').textContent = stacked > 1
+    ? `Phases overlap — you finish this fast with ${stacked} benefits active at once.`
+    : `Phases overlap — once a benefit switches on, it stays active until you break the fast.`;
+  $('#tlRows').innerHTML = rows.map(r => `
+    <div class="tlrow">
+      <div class="tlname"><span class="tlico">${r.st.icon}</span>${r.st.short}</div>
+      <div class="tltrack">
+        <div class="tlbar ${r.runs ? 'runs' : ''}" style="left:${r.from / durH * 100}%;right:${(1 - r.to / durH) * 100}%;background:${r.st.color}"></div>
+      </div>
+      <div class="tldur">${fmtDur(Math.round((r.to - r.from) * 60))}</div>
+    </div>`).join('');
+  const mids = durH >= 8 ? [0, Math.round(durH / 2), Math.round(durH)] : [0, Math.round(durH)];
+  $('#tlAxis').innerHTML = mids.map((h, i) =>
+    `<span>${i === mids.length - 1 ? fmtDur(Math.round(durH * 60)) + ' — you eat' : h + 'h'}</span>`).join('');
 }
 function renderStages(hours){
   const zone = currentZone(hours);
@@ -757,6 +785,8 @@ function renderStatus(){
   dot.classList.toggle('on', S.enabled);
   const progWrap = $('#progWrap'), elapsedArc = $('#elapsedArc');
 
+  const tlNowEl = $('#tlNow');
+  if (tlNowEl) tlNowEl.style.display = 'none';
   if (!S.enabled){
     body.innerHTML = `Turn on the schedule and VitaFast handles the rest — no start
       or stop buttons. Every fast is tracked automatically and you're notified at
@@ -781,6 +811,11 @@ function renderStatus(){
     $('#progFill').style.width = pct + '%';
     elapsedArc.setAttribute('d', arcPath(startMin, nowMin(), 112));
     elapsedArc.setAttribute('opacity', '.9');
+    const tlNow = $('#tlNow');
+    if (tlNow){
+      tlNow.style.display = 'block';
+      tlNow.style.left = `calc(105px + (100% - 169px) * ${Math.min(1, elapsed / af.dur)})`;
+    }
   } else {
     const nf = nextFastStart(now);
     progWrap.style.display = 'none';
