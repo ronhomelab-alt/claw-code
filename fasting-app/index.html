@@ -493,31 +493,36 @@ function applyPreset(h){
 }
 
 /* ============================== STAGES ============================== */
+/* Phase onsets and durations are APPROXIMATE — they shift with your last meal,
+   activity, and metabolism. `persists` = the benefit stays active (and usually
+   deepens) until you eat; `endsAt` = a non-persistent phase that ends at a set
+   hour rather than handing off to the next onset. Timings reflect the
+   evidence: the metabolic switch is a gradual dimmer, not an on/off flip. */
 const STAGES = [
   {at:0,  icon:'🍽️', short:'FED STATE', color:'#38bdf8', persists:false, name:'Fed state',
-    cause:'Insulin is elevated while your last meal digests.',
-    effect:'The body stores energy; fat burning is on pause.'},
-  {at:4,  icon:'📉', short:'SUGAR DIP', color:'#facc15', persists:false, name:'Blood sugar falls',
-    cause:'Digestion finishes and insulin begins to drop.',
-    effect:'Your body flips from storing energy to releasing it.'},
-  {at:8,  icon:'🔋', short:'GLYCOGEN', color:'#fb923c', persists:false, name:'Glycogen tapping',
-    cause:'Liver glycogen becomes the main fuel source.',
-    effect:'Stored carbohydrate is steadily burned down.'},
+    cause:'Insulin is high while your last meal is digested (~3–4h).',
+    effect:'Energy is being stored; fat-burning is paused until insulin falls.'},
+  {at:4,  icon:'📉', short:'LOW INSULIN', color:'#facc15', persists:true, name:'Insulin falls',
+    cause:'Digestion finishes and insulin drops — then stays low the rest of the fast.',
+    effect:'The foundation of fasting: low insulin is what unlocks everything below, and it lasts until you eat.'},
+  {at:8,  icon:'🔋', short:'GLYCOGEN', color:'#fb923c', persists:false, endsAt:20, name:'Glycogen burn-down',
+    cause:'The liver runs on its stored glucose (glycogen).',
+    effect:'Stored carbohydrate is drawn down over roughly 18–24h, then the tank runs dry.'},
   {at:12, icon:'🔥', short:'FAT BURN', color:'#f87171', persists:true, name:'Fat burning',
-    cause:'Glycogen runs low, so stored fat is mobilised.',
-    effect:'Fatty acids become the primary fuel — the weight-loss zone.'},
-  {at:14, icon:'♻️', short:'AUTOPHAGY', color:'#4ade80', persists:true, name:'Autophagy',
-    cause:'Nutrient sensors switch the body into repair mode.',
-    effect:'Cells recycle damaged components — deep cellular clean-up.'},
-  {at:16, icon:'🧪', short:'KETOSIS', color:'#a78bfa', persists:true, name:'Ketosis deepens',
-    cause:'The liver converts fat into ketones to fuel the brain.',
-    effect:'Steadier energy, reduced hunger, sharper focus.'},
-  {at:18, icon:'💪', short:'GH PEAK', color:'#f472b6', persists:true, name:'Growth-hormone peak',
-    cause:'GH secretion rises to protect lean muscle.',
-    effect:'Muscle is preserved while fat loss and repair accelerate.'},
+    cause:'Glycogen is low, so the body shifts toward burning stored fat.',
+    effect:'Fat becomes a primary fuel — and this deepens the longer you fast.'},
+  {at:16, icon:'♻️', short:'AUTOPHAGY', color:'#4ade80', persists:true, name:'Autophagy',
+    cause:'Low nutrients nudge cells toward repair-and-recycle mode.',
+    effect:'Cells recycle damaged parts. Popularly cited from ~16h, but robust evidence is 24h+ and mostly from animal studies — human timing is uncertain.'},
+  {at:18, icon:'🧪', short:'KETOSIS', color:'#a78bfa', persists:true, name:'Ketosis building',
+    cause:'The liver turns fat into ketones to fuel the brain.',
+    effect:'Steadier energy and less hunger. Ketones keep climbing — substantial ketosis is usually 24h+.'},
+  {at:20, icon:'💪', short:'GH RISING', color:'#f472b6', persists:true, name:'Growth hormone rising',
+    cause:'Sustained low insulin lifts growth-hormone output.',
+    effect:'Helps protect lean muscle while fat loss continues. GH keeps rising, peaking around 36–48h.'},
   {at:24, icon:'🛡️', short:'RENEWAL', color:'#2dd4bf', persists:true, name:'Deep renewal',
-    cause:'A prolonged fast triggers immune-cell regeneration.',
-    effect:'Peak autophagy and a reset of insulin sensitivity.'},
+    cause:'A prolonged fast (beyond ~24h) ramps up cellular regeneration.',
+    effect:'Peak autophagy and immune-cell renewal — extended fasts, done with care.'},
 ];
 function hexA(hex, a){
   const n = parseInt(hex.slice(1), 16);
@@ -673,13 +678,16 @@ function renderTimeline(durH){
     const st = STAGES[i];
     if (st.at >= durH) break;
     const nextAt = i + 1 < STAGES.length ? STAGES[i + 1].at : 24;
-    const endH = st.persists ? durH : Math.min(nextAt, durH);
+    // persistent benefits run to the end; others end at their own endsAt
+    // (e.g. glycogen depleting ~20h) or hand off to the next phase's onset.
+    const endH = st.persists ? durH : Math.min(st.endsAt ?? nextAt, durH);
     rows.push({ st, from: st.at, to: endH, runs: st.persists && endH >= durH });
   }
   const stacked = rows.filter(r => r.runs).length;
-  $('#tlSub').textContent = stacked > 1
-    ? `Phases overlap — you finish this fast with ${stacked} benefits active at once.`
-    : `Phases overlap — once a benefit switches on, it stays active until you break the fast.`;
+  $('#tlSub').innerHTML = (stacked > 1
+    ? `Phases overlap — you finish this fast with <b style="color:var(--ink)">${stacked}</b> benefits active at once.`
+    : `Phases overlap — once a benefit switches on, it stays active until you break the fast.`)
+    + ` <span style="color:var(--ink-3)">Timings are approximate and vary by person, activity, and last meal.</span>`;
   $('#tlRows').innerHTML = rows.map(r => `
     <div class="tlrow">
       <div class="tlname"><span class="tlico">${r.st.icon}</span>${r.st.short}</div>
