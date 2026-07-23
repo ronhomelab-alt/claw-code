@@ -298,6 +298,7 @@
           <circle cx="170" cy="170" r="128" fill="none" stroke="#132e34" stroke-width="18"/>
           <g id="ticks"></g>
           <g id="segArcs" style="filter:drop-shadow(0 0 10px rgba(45,212,191,.22))"></g>
+          <g id="benefitRings"></g>
           <path id="elapsedArc" fill="none" stroke="#fbbf24" stroke-width="4" stroke-linecap="round" opacity="0"/>
           <g id="hStart" style="cursor:grab">
             <circle r="26" fill="transparent"/>
@@ -795,6 +796,8 @@ function renderStatus(){
 
   const tlNowEl = $('#tlNow');
   if (tlNowEl) tlNowEl.style.display = 'none';
+  const ringsEl = $('#benefitRings');
+  if (ringsEl) ringsEl.innerHTML = '';
   if (!S.enabled){
     body.innerHTML = `Turn on the schedule and VitaFast handles the rest — no start
       or stop buttons. Every fast is tracked automatically and you're notified at
@@ -819,6 +822,24 @@ function renderStatus(){
     $('#progFill').style.width = pct + '%';
     elapsedArc.setAttribute('d', arcPath(startMin, nowMin(), 112));
     elapsedArc.setAttribute('opacity', '.9');
+    // concentric "carry-forward" rings: one nested layer per benefit that has
+    // switched on and is still active, each sweeping from its onset to now.
+    if (ringsEl){
+      const nowM = nowMin();
+      const carried = STAGES.filter(s => s.persists && s.at <= elapsed / 60);
+      ringsEl.innerHTML = carried.map((s, i) => {
+        const onsetMin = (startMin + s.at * 60) % DAY;
+        const span = (nowM - onsetMin + DAY) % DAY;   // minutes this benefit has been active
+        const r = 107 - i * 5;   // thin nested band just inside the phase ring
+        const dot = pt(nowM, r);
+        // guard: a just-started benefit (span≈0) would make arcPath draw a full
+        // circle — show only its leading dot until it has a real arc to sweep.
+        const arc = span >= 4
+          ? `<path d="${arcPath(onsetMin, nowM, r)}" fill="none" stroke="${s.color}" stroke-width="3.5" stroke-linecap="round" opacity="0.9"/>`
+          : '';
+        return arc + `<circle cx="${dot.x}" cy="${dot.y}" r="3.2" fill="${s.color}"/>`;
+      }).join('');
+    }
     const tlNow = $('#tlNow');
     if (tlNow){
       tlNow.style.display = 'block';
