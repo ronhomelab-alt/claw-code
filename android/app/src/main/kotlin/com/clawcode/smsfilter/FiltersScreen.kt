@@ -19,6 +19,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -44,6 +45,7 @@ import java.util.Date
 fun FiltersScreen(
     ruleStore: RuleStore,
     blockedLog: BlockedLog,
+    settings: AppSettings,
     isDefaultSmsApp: () -> Boolean,
     onRequestDefaultSmsRole: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
@@ -77,7 +79,12 @@ fun FiltersScreen(
             when (tab) {
                 0 -> RulesTab(ruleStore)
                 1 -> BlockedTab(blockedLog)
-                2 -> SetupTab(isDefaultSmsApp, onRequestDefaultSmsRole, onOpenNotificationAccess)
+                2 -> SetupTab(
+                    settings,
+                    isDefaultSmsApp,
+                    onRequestDefaultSmsRole,
+                    onOpenNotificationAccess,
+                )
             }
         }
     }
@@ -200,11 +207,49 @@ private fun BlockedTab(blockedLog: BlockedLog) {
 
 @Composable
 private fun SetupTab(
+    settings: AppSettings,
     isDefaultSmsApp: () -> Boolean,
     onRequestDefaultSmsRole: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
 ) {
+    var hidePreviews by remember { mutableStateOf(settings.hideNotificationPreviews) }
+
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Privacy & security", style = MaterialTheme.typography.titleMedium)
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        "Hide message previews",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Switch(
+                        checked = hidePreviews,
+                        onCheckedChange = {
+                            settings.hideNotificationPreviews = it
+                            hidePreviews = it
+                        },
+                    )
+                }
+                Text(
+                    "Notifications show only who texted — never the message content — " +
+                        "so scam text can't appear on your lock screen or shade. " +
+                        "Open the app to read messages."
+                )
+                Text(
+                    "Always on: message text is never rendered as clickable links, and " +
+                        "MMS attachments are never downloaded — nothing in a message " +
+                        "can auto-fetch content or execute.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
         Text("Choose a filtering mode", style = MaterialTheme.typography.titleMedium)
 
         Card(Modifier.fillMaxWidth()) {

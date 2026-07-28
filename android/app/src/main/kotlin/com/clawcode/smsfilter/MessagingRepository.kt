@@ -21,6 +21,11 @@ data class Conversation(
     val unreadCount: Int,
 )
 
+data class ContactMatch(
+    val name: String,
+    val number: String,
+)
+
 data class ThreadMessage(
     val id: Long,
     val address: String,
@@ -157,6 +162,36 @@ class MessagingRepository(private val context: Context) {
             "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.READ} = 0",
             arrayOf(threadId.toString()),
         )
+    }
+
+    /** Contacts whose name or number matches [query], for compose-time autocomplete. */
+    fun searchContacts(query: String, limit: Int = 8): List<ContactMatch> {
+        if (query.isBlank()) return emptyList()
+        val uri = Uri.withAppendedPath(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI,
+            Uri.encode(query.trim()),
+        )
+        val result = mutableListOf<ContactMatch>()
+        try {
+            context.contentResolver.query(
+                uri,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER,
+                ),
+                null,
+                null,
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            )?.use { cursor ->
+                while (cursor.moveToNext() && result.size < limit) {
+                    val number = cursor.getString(1) ?: continue
+                    result += ContactMatch(name = cursor.getString(0) ?: number, number = number)
+                }
+            }
+        } catch (_: SecurityException) {
+            // READ_CONTACTS not granted; no suggestions.
+        }
+        return result.distinctBy { it.number.filter(Char::isDigit) }
     }
 
     /** Contact display name for [address], falling back to the number itself. */

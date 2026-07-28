@@ -49,6 +49,15 @@ cited in FCC/FTC "one-ring" (Wangiri) scam advisories: 232, 268, 284, 473,
 deliberately **not** hardcoded — spam numbers are spoofed and recycled within
 days — but you can import a current community blocklist as a rules file.
 
+## Privacy & security posture
+
+- **Hide message previews** (Setup tab): notifications show only the sender,
+  never message content, so scam text can't appear on the lock screen.
+- Message bodies are rendered as plain text — links are never clickable.
+- MMS attachments are never downloaded or parsed; nothing in an incoming
+  message can auto-fetch content or execute.
+- All rules and logs live on-device; the app has no network permission at all.
+
 ## Project layout
 
 - `filtercore/` — pure-JVM Kotlin module: matching engine, rule parsing,

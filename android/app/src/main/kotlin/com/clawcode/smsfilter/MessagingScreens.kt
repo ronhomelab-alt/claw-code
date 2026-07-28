@@ -273,6 +273,10 @@ fun NewMessageScreen(
 ) {
     var recipient by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
+    var pickedContact by remember { mutableStateOf<ContactMatch?>(null) }
+    val suggestions = remember(recipient, pickedContact) {
+        if (pickedContact != null) emptyList() else repository.searchContacts(recipient)
+    }
 
     Scaffold(
         topBar = {
@@ -292,10 +296,38 @@ fun NewMessageScreen(
         ) {
             OutlinedTextField(
                 value = recipient,
-                onValueChange = { recipient = it },
+                onValueChange = {
+                    recipient = it
+                    pickedContact = null
+                },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("To (phone number)") },
+                label = { Text("To (name or phone number)") },
+                supportingText = pickedContact?.let { picked ->
+                    { Text("${picked.name} — ${picked.number}") }
+                },
             )
+            suggestions.forEach { match ->
+                Surface(
+                    onClick = {
+                        recipient = match.number
+                        pickedContact = match
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Avatar(match.name)
+                        Column(Modifier.padding(start = 12.dp)) {
+                            Text(match.name, style = MaterialTheme.typography.titleSmall)
+                            Text(match.number, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
             OutlinedTextField(
                 value = body,
                 onValueChange = { body = it },

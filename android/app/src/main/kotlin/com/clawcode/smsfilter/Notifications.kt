@@ -75,22 +75,31 @@ object Notifications {
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
             .build()
 
-        val sender = Person.Builder().setName(displayName).setKey(address).build()
-        val style = NotificationCompat.MessagingStyle(
-            Person.Builder().setName("You").setKey("self").build()
-        ).addMessage(body, System.currentTimeMillis(), sender)
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_action_chat)
-            .setStyle(style)
             .setContentIntent(openIntent)
             .addAction(replyAction)
             .addAction(markReadAction)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
-            .build()
 
-        manager.notify(notificationId, notification)
+        if (App.from(context).settings.hideNotificationPreviews) {
+            // Privacy mode: never surface message content in the shade or
+            // lock screen — sender only.
+            builder
+                .setContentTitle(displayName)
+                .setContentText("New message")
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+        } else {
+            val sender = Person.Builder().setName(displayName).setKey(address).build()
+            builder.setStyle(
+                NotificationCompat.MessagingStyle(
+                    Person.Builder().setName("You").setKey("self").build()
+                ).addMessage(body, System.currentTimeMillis(), sender)
+            )
+        }
+
+        manager.notify(notificationId, builder.build())
     }
 
     fun cancel(context: Context, threadId: Long) {

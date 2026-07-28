@@ -71,6 +71,7 @@ class MainActivity : ComponentActivity() {
                     is Screen.Filters -> FiltersScreen(
                         ruleStore = app.ruleStore,
                         blockedLog = app.blockedLog,
+                        settings = app.settings,
                         isDefaultSmsApp = { isDefaultSmsApp() },
                         onRequestDefaultSmsRole = { requestDefaultSmsRole() },
                         onOpenNotificationAccess = {
