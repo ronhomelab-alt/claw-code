@@ -35,21 +35,27 @@ class FilterEngine(private val rules: RuleSet) {
 
     /**
      * @param senderIsContact when true, the message is from someone in the
-     *   user's contacts, so body [textRules][RuleSet.textRules] are skipped —
-     *   a family member mentioning a rule word must never be auto-blocked.
-     *   Explicit number/pattern blocks still apply.
+     *   user's contacts, so the broad rules — area-code/[numberPatterns] and
+     *   body [textRules][RuleSet.textRules] — are skipped. A contact is never
+     *   caught by "block all 407" or by a keyword. The one exception is an
+     *   explicit exact-number block (the Block button), which still applies
+     *   so deliberately blocking a specific person works.
      */
     fun evaluate(sender: String, body: String, senderIsContact: Boolean = false): Verdict {
         val digits = PhoneNumbers.normalize(sender)
 
         if (digits.isNotEmpty() && digits in rules.allowedNumbers) return Verdict.Allow
 
+        // Explicit exact-number block applies to everyone, contacts included.
         if (digits.isNotEmpty() && digits in rules.blockedNumbers) {
             return Verdict.Block("number $sender is on the blocklist")
         }
 
-        rules.numberPatterns.firstOrNull { it.matches(digits) }?.let {
-            return Verdict.Block("number $sender matches pattern \"${it.raw}\"")
+        // Broad area-code / pattern rules never apply to a contact.
+        if (!senderIsContact) {
+            rules.numberPatterns.firstOrNull { it.matches(digits) }?.let {
+                return Verdict.Block("number $sender matches pattern \"${it.raw}\"")
+            }
         }
 
         // Never body-block a contact, and never a message that looks like a

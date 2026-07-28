@@ -122,18 +122,27 @@ class FilterEngineTest {
     }
 
     @Test
-    fun `contacts are exempt from text rules but not number rules`() {
-        // Body would normally be blocked, but a contact is never text-blocked.
+    fun `contacts are exempt from pattern and text rules`() {
+        // Text rule: contact is never body-blocked; non-contact is.
         assertIs<Verdict.Allow>(
             engine.evaluate("(555) 555-0100", "free crypto for you", senderIsContact = true)
         )
-        // A contact on an explicitly blocked pattern is still blocked.
-        assertIs<Verdict.Block>(
-            engine.evaluate("(407) 555-0134", "hi mom", senderIsContact = true)
-        )
-        // Non-contacts still hit text rules.
         assertIs<Verdict.Block>(
             engine.evaluate("(555) 555-0100", "free crypto for you", senderIsContact = false)
+        )
+        // Area-code/pattern rule: contact in blocked 407 is allowed; stranger blocked.
+        assertIs<Verdict.Allow>(
+            engine.evaluate("(407) 555-0134", "hi mom", senderIsContact = true)
+        )
+        assertIs<Verdict.Block>(
+            engine.evaluate("(407) 555-0134", "hi mom", senderIsContact = false)
+        )
+    }
+
+    @Test
+    fun `explicit exact-number block still applies to a contact`() {
+        assertIs<Verdict.Block>(
+            engine.evaluate("(202) 555-0175", "hi", senderIsContact = true)
         )
     }
 
