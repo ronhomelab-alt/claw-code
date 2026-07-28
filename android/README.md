@@ -35,7 +35,10 @@ Rules are evaluated in this order (first match wins):
    5/$→s, 7→t, 8→b, @→a) are folded away before matching, so one
    "Top Tier Solar" rule also catches "TOP-TIER SOLAR!!", "T0p T1er S0lar",
    and "TopTier$olar". Messages that look like verification codes are exempt
-   from text rules (a lost OTP hurts more than one spam text).
+   from text rules (a lost OTP hurts more than one spam text). **Saved
+   contacts are also exempt from text rules** — a family member mentioning a
+   rule word is never auto-blocked (requires the READ_CONTACTS permission).
+   Explicit number/pattern blocks still apply to contacts.
 
 Rules are stored in a human-editable text file (`rules.txt` in app storage)
 with `allow:` / `block:` / `pattern:` / `text:` lines, so lists can be

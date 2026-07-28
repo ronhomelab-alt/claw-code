@@ -37,8 +37,11 @@ class MessagesNotificationListener : NotificationListenerService() {
             ?: ""
 
         val app = App.from(this)
-        // The notification title is the sender (number or contact name).
-        when (val verdict = app.ruleStore.engine().evaluate(title, text)) {
+        // The notification title is the sender: a contact NAME for known
+        // contacts (letters), or a bare number for unknown senders. Either
+        // signals a contact → exempt from text rules.
+        val isContact = title.any { it.isLetter() } || app.messagingRepository.isContact(title)
+        when (val verdict = app.ruleStore.engine().evaluate(title, text, isContact)) {
             is Verdict.Block -> {
                 cancelNotification(sbn.key)
                 app.blockedLog.append(

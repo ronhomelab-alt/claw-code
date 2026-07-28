@@ -122,6 +122,22 @@ class FilterEngineTest {
     }
 
     @Test
+    fun `contacts are exempt from text rules but not number rules`() {
+        // Body would normally be blocked, but a contact is never text-blocked.
+        assertIs<Verdict.Allow>(
+            engine.evaluate("(555) 555-0100", "free crypto for you", senderIsContact = true)
+        )
+        // A contact on an explicitly blocked pattern is still blocked.
+        assertIs<Verdict.Block>(
+            engine.evaluate("(407) 555-0134", "hi mom", senderIsContact = true)
+        )
+        // Non-contacts still hit text rules.
+        assertIs<Verdict.Block>(
+            engine.evaluate("(555) 555-0100", "free crypto for you", senderIsContact = false)
+        )
+    }
+
+    @Test
     fun `verification codes are never body-blocked`() {
         assertIs<Verdict.Allow>(
             engine.evaluate("(555) 555-0100", "Your FREE CRYPTO exchange verification code is 483920")

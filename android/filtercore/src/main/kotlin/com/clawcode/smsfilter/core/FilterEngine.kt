@@ -33,7 +33,13 @@ class FilterEngine(private val rules: RuleSet) {
             .map { it to TextNormalizer.canonical(it) }
             .filter { it.second.isNotEmpty() }
 
-    fun evaluate(sender: String, body: String): Verdict {
+    /**
+     * @param senderIsContact when true, the message is from someone in the
+     *   user's contacts, so body [textRules][RuleSet.textRules] are skipped —
+     *   a family member mentioning a rule word must never be auto-blocked.
+     *   Explicit number/pattern blocks still apply.
+     */
+    fun evaluate(sender: String, body: String, senderIsContact: Boolean = false): Verdict {
         val digits = PhoneNumbers.normalize(sender)
 
         if (digits.isNotEmpty() && digits in rules.allowedNumbers) return Verdict.Allow
@@ -46,9 +52,9 @@ class FilterEngine(private val rules: RuleSet) {
             return Verdict.Block("number $sender matches pattern \"${it.raw}\"")
         }
 
-        // Never body-block a message that looks like a verification code:
-        // losing an OTP hurts far more than seeing one spam text.
-        if (!looksLikeVerificationCode(body)) {
+        // Never body-block a contact, and never a message that looks like a
+        // verification code: losing either hurts far more than one spam text.
+        if (!senderIsContact && !looksLikeVerificationCode(body)) {
             // Match in canonical space so "T0p-T1er $olar" still hits a
             // "Top Tier Solar" rule despite case/spacing/leetspeak tricks.
             val canonicalBody = TextNormalizer.canonical(body)

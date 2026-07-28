@@ -360,6 +360,27 @@ class MessagingRepository(private val context: Context) {
         return result.distinctBy { it.number.filter(Char::isDigit) }
     }
 
+    /** True if [address] matches a saved contact (used to exempt them from text rules). */
+    fun isContact(address: String): Boolean {
+        if (address.isBlank()) return false
+        return try {
+            val uri = Uri.withAppendedPath(
+                ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
+                Uri.encode(address),
+            )
+            context.contentResolver.query(
+                uri,
+                arrayOf(ContactsContract.PhoneLookup._ID),
+                null,
+                null,
+                null,
+            )?.use { it.moveToFirst() } ?: false
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "isContact lookup failed", e)
+            false
+        }
+    }
+
     /** Contact display name for [address], falling back to the number itself. */
     fun displayName(address: String): String {
         if (address.isBlank()) return address

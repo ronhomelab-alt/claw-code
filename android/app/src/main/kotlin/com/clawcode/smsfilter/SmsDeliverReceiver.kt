@@ -35,7 +35,8 @@ class SmsDeliverReceiver : BroadcastReceiver() {
         val body = messages.joinToString("") { it.displayMessageBody ?: "" }
         val app = App.from(context)
 
-        when (val verdict = app.ruleStore.engine().evaluate(sender, body)) {
+        val isContact = app.messagingRepository.isContact(sender)
+        when (val verdict = app.ruleStore.engine().evaluate(sender, body, isContact)) {
             is Verdict.Block -> {
                 // Quarantine, Google-Messages-style: the message is stored
                 // (marked read, no notification) so the Blocked screen shows

@@ -201,7 +201,8 @@ fun ConversationsScreen(
                 for (message in repository.recentInboxMessages(500)) {
                     val digits = PhoneNumbers.normalize(message.address)
                     if (digits.isEmpty() || digits in alreadySpam || digits in matched) continue
-                    val verdict = engine.evaluate(message.address, message.body)
+                    val isContact = repository.isContact(message.address)
+                    val verdict = engine.evaluate(message.address, message.body, isContact)
                     if (verdict is com.clawcode.smsfilter.core.Verdict.Block) {
                         matched[digits] = BlockedMessage(
                             System.currentTimeMillis(), message.address, message.body,
