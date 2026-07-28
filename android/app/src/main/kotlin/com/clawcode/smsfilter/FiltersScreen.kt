@@ -280,5 +280,19 @@ private fun SetupTab(
                 Button(onClick = onOpenNotificationAccess) { Text("Grant notification access") }
             }
         }
+
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val versionName = remember {
+            try {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName
+            } catch (_: Exception) {
+                null
+            } ?: "?"
+        }
+        Text(
+            "SMS Spam Filter v$versionName",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 8.dp),
+        )
     }
 }
