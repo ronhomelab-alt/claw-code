@@ -53,18 +53,33 @@ class MessagingRepository(private val context: Context) {
     private val nameCache = mutableMapOf<String, String>()
 
     init {
-        context.contentResolver.registerContentObserver(
-            Telephony.Sms.CONTENT_URI,
-            true,
-            object : ContentObserver(Handler(Looper.getMainLooper())) {
-                override fun onChange(selfChange: Boolean, uri: Uri?) {
-                    _changeTick.value = _changeTick.value + 1
-                }
-            },
-        )
+        try {
+            context.contentResolver.registerContentObserver(
+                Telephony.Sms.CONTENT_URI,
+                true,
+                object : ContentObserver(Handler(Looper.getMainLooper())) {
+                    override fun onChange(selfChange: Boolean, uri: Uri?) {
+                        _changeTick.value = _changeTick.value + 1
+                    }
+                },
+            )
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "could not observe SMS provider", e)
+        }
     }
 
-    fun conversations(): List<Conversation> {
+    private companion object {
+        const val TAG = "MessagingRepository"
+    }
+
+    fun conversations(): List<Conversation> = try {
+        loadConversations()
+    } catch (e: Exception) {
+        android.util.Log.e(TAG, "failed to load conversations", e)
+        emptyList()
+    }
+
+    private fun loadConversations(): List<Conversation> {
         val byThread = LinkedHashMap<Long, Conversation>()
         context.contentResolver.query(
             Telephony.Sms.CONTENT_URI,
@@ -82,7 +97,8 @@ class MessagingRepository(private val context: Context) {
         )?.use { cursor ->
             while (cursor.moveToNext()) {
                 val threadId = cursor.getLong(0)
-                val address = cursor.getString(1) ?: continue
+                val address = cursor.getString(1)
+                if (address.isNullOrBlank()) continue
                 val body = cursor.getString(2) ?: ""
                 val date = cursor.getLong(3)
                 val type = cursor.getInt(4)
@@ -108,7 +124,14 @@ class MessagingRepository(private val context: Context) {
         return byThread.values.toList()
     }
 
-    fun messages(threadId: Long): List<ThreadMessage> {
+    fun messages(threadId: Long): List<ThreadMessage> = try {
+        loadMessages(threadId)
+    } catch (e: Exception) {
+        android.util.Log.e(TAG, "failed to load thread $threadId", e)
+        emptyList()
+    }
+
+    private fun loadMessages(threadId: Long): List<ThreadMessage> {
         val result = mutableListOf<ThreadMessage>()
         context.contentResolver.query(
             Telephony.Sms.CONTENT_URI,
@@ -187,50 +210,59 @@ class MessagingRepository(private val context: Context) {
         }
 
     fun markThreadRead(threadId: Long) {
-        val values = ContentValues().apply {
-            put(Telephony.Sms.READ, 1)
-            put(Telephony.Sms.SEEN, 1)
+        try {
+            val values = ContentValues().apply {
+                put(Telephony.Sms.READ, 1)
+                put(Telephony.Sms.SEEN, 1)
+            }
+            context.contentResolver.update(
+                Telephony.Sms.CONTENT_URI,
+                values,
+                "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.READ} = 0",
+                arrayOf(threadId.toString()),
+            )
+        } catch (e: Exception) {
+            // Non-default SMS apps may not be allowed to update the provider.
+            android.util.Log.w(TAG, "could not mark thread $threadId read", e)
         }
-        context.contentResolver.update(
-            Telephony.Sms.CONTENT_URI,
-            values,
-            "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.READ} = 0",
-            arrayOf(threadId.toString()),
-        )
     }
 
     /** Contacts whose name or number matches [query], for compose-time autocomplete. */
-    fun searchContacts(query: String, limit: Int = 8): List<ContactMatch> {
+    fun searchContacts(query: String, limit: Int = 8): List<ContactMatch> = try {
+        doSearchContacts(query, limit)
+    } catch (e: Exception) {
+        android.util.Log.w(TAG, "contact search failed", e)
+        emptyList()
+    }
+
+    private fun doSearchContacts(query: String, limit: Int): List<ContactMatch> {
         if (query.isBlank()) return emptyList()
         val uri = Uri.withAppendedPath(
             ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI,
             Uri.encode(query.trim()),
         )
         val result = mutableListOf<ContactMatch>()
-        try {
-            context.contentResolver.query(
-                uri,
-                arrayOf(
-                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
-                    ContactsContract.CommonDataKinds.Phone.NUMBER,
-                ),
-                null,
-                null,
+        context.contentResolver.query(
+            uri,
+            arrayOf(
                 ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
-            )?.use { cursor ->
-                while (cursor.moveToNext() && result.size < limit) {
-                    val number = cursor.getString(1) ?: continue
-                    result += ContactMatch(name = cursor.getString(0) ?: number, number = number)
-                }
+                ContactsContract.CommonDataKinds.Phone.NUMBER,
+            ),
+            null,
+            null,
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+        )?.use { cursor ->
+            while (cursor.moveToNext() && result.size < limit) {
+                val number = cursor.getString(1) ?: continue
+                result += ContactMatch(name = cursor.getString(0) ?: number, number = number)
             }
-        } catch (_: SecurityException) {
-            // READ_CONTACTS not granted; no suggestions.
         }
         return result.distinctBy { it.number.filter(Char::isDigit) }
     }
 
     /** Contact display name for [address], falling back to the number itself. */
     fun displayName(address: String): String {
+        if (address.isBlank()) return address
         nameCache[address]?.let { return it }
         val name = try {
             val uri = Uri.withAppendedPath(
@@ -246,8 +278,11 @@ class MessagingRepository(private val context: Context) {
             )?.use { cursor ->
                 if (cursor.moveToFirst()) cursor.getString(0) else null
             }
-        } catch (_: SecurityException) {
-            null // READ_CONTACTS not granted; show the raw number.
+        } catch (e: Exception) {
+            // Missing permission, malformed address, or provider quirk:
+            // never let a name lookup take the app down.
+            android.util.Log.w(TAG, "contact lookup failed for sender", e)
+            null
         } ?: address
         nameCache[address] = name
         return name
