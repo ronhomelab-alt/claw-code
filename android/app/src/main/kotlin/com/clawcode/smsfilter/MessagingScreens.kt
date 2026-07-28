@@ -261,10 +261,18 @@ fun ConversationsScreen(
                         selectedConversations.forEach { metaStore.setStarred(it.address, true) }
                         selected = emptySet()
                     },
+                    onUnstar = {
+                        selectedConversations.forEach { metaStore.setStarred(it.address, false) }
+                        selected = emptySet()
+                    },
                     onMarkRead = { setReadState(selectedConversations, true); selected = emptySet() },
                     onMarkUnread = { setReadState(selectedConversations, false); selected = emptySet() },
                     onMarkImportant = {
                         selectedConversations.forEach { metaStore.setImportant(it.address, true) }
+                        selected = emptySet()
+                    },
+                    onUnmarkImportant = {
+                        selectedConversations.forEach { metaStore.setImportant(it.address, false) }
                         selected = emptySet()
                     },
                     onLabel = { labelDialogFor = selectedConversations },
@@ -373,9 +381,11 @@ private fun SelectionTopBar(
     count: Int,
     onClose: () -> Unit,
     onStar: () -> Unit,
+    onUnstar: () -> Unit,
     onMarkRead: () -> Unit,
     onMarkUnread: () -> Unit,
     onMarkImportant: () -> Unit,
+    onUnmarkImportant: () -> Unit,
     onLabel: () -> Unit,
     onBlock: () -> Unit,
     onDelete: () -> Unit,
@@ -390,7 +400,7 @@ private fun SelectionTopBar(
         title = { Text("$count selected") },
         actions = {
             IconButton(onClick = onStar) {
-                Icon(Icons.Default.Star, contentDescription = "Star")
+                Icon(Icons.Default.Star, contentDescription = "Add star")
             }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Default.Delete, contentDescription = "Delete")
@@ -399,12 +409,16 @@ private fun SelectionTopBar(
                 Icon(Icons.Default.MoreVert, contentDescription = "More actions")
             }
             DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+                DropdownMenuItem(text = { Text("Remove star") },
+                    onClick = { overflow = false; onUnstar() })
                 DropdownMenuItem(text = { Text("Mark read") },
                     onClick = { overflow = false; onMarkRead() })
                 DropdownMenuItem(text = { Text("Mark unread") },
                     onClick = { overflow = false; onMarkUnread() })
                 DropdownMenuItem(text = { Text("Mark important") },
                     onClick = { overflow = false; onMarkImportant() })
+                DropdownMenuItem(text = { Text("Mark not important") },
+                    onClick = { overflow = false; onUnmarkImportant() })
                 DropdownMenuItem(text = { Text("Label as…") },
                     onClick = { overflow = false; onLabel() })
                 DropdownMenuItem(text = { Text("Block") },
@@ -599,12 +613,7 @@ internal fun ConversationRow(
             )
             if (!selectionMode && onStarToggle != null) {
                 IconButton(onClick = onStarToggle, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        if (meta.starred) Icons.Default.Star else Icons.Default.Star,
-                        contentDescription = if (meta.starred) "Unstar" else "Star",
-                        tint = if (meta.starred) MaterialTheme.colorScheme.tertiary
-                        else MaterialTheme.colorScheme.outline,
-                    )
+                    StarIcon(meta.starred)
                 }
             } else if (unread) {
                 Box(
@@ -616,6 +625,19 @@ internal fun ConversationRow(
             }
         }
     }
+}
+
+/** Star icon: a true hollow outline when unstarred, gold-filled when starred. */
+@Composable
+private fun StarIcon(starred: Boolean) {
+    Icon(
+        painter = androidx.compose.ui.res.painterResource(
+            if (starred) R.drawable.ic_star_filled else R.drawable.ic_star_outline
+        ),
+        contentDescription = if (starred) "Unstar" else "Star",
+        tint = if (starred) MaterialTheme.colorScheme.tertiary
+        else MaterialTheme.colorScheme.outline,
+    )
 }
 
 @Composable
@@ -796,12 +818,7 @@ fun ThreadScreen(
                 },
                 actions = {
                     IconButton(onClick = { metaStore.toggleStar(address) }) {
-                        Icon(
-                            if (meta.starred) Icons.Default.Star else Icons.Default.Star,
-                            contentDescription = if (meta.starred) "Unstar" else "Star",
-                            tint = if (meta.starred) MaterialTheme.colorScheme.tertiary
-                            else androidx.compose.material3.LocalContentColor.current,
-                        )
+                        StarIcon(meta.starred)
                     }
                     IconButton(onClick = { menuOpen = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "Conversation options")
