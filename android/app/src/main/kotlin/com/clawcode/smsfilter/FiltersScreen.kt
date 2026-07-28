@@ -1,6 +1,8 @@
 package com.clawcode.smsfilter
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -213,8 +215,37 @@ private fun SetupTab(
     onOpenNotificationAccess: () -> Unit,
 ) {
     var hidePreviews by remember { mutableStateOf(settings.hideNotificationPreviews) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val crashFile = remember { java.io.File(context.filesDir, App.CRASH_FILE) }
+    var crashText by remember {
+        mutableStateOf(if (crashFile.exists()) crashFile.readText() else null)
+    }
 
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(
+        Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        crashText?.let { trace ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Last crash report",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Text(
+                        "Screenshot this and share it to get the crash fixed:",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(trace.take(1500), style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = {
+                        crashFile.delete()
+                        crashText = null
+                    }) { Text("Clear") }
+                }
+            }
+        }
+
         Text("Privacy & security", style = MaterialTheme.typography.titleMedium)
 
         Card(Modifier.fillMaxWidth()) {
@@ -281,7 +312,6 @@ private fun SetupTab(
             }
         }
 
-        val context = androidx.compose.ui.platform.LocalContext.current
         val versionName = remember {
             try {
                 context.packageManager.getPackageInfo(context.packageName, 0).versionName

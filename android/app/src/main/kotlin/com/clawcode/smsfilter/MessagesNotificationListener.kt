@@ -20,6 +20,14 @@ import com.clawcode.smsfilter.core.Verdict
 class MessagesNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        try {
+            screen(sbn)
+        } catch (e: Exception) {
+            android.util.Log.e("MessagesNotifListener", "failed to screen notification", e)
+        }
+    }
+
+    private fun screen(sbn: StatusBarNotification) {
         if (sbn.packageName !in MESSAGING_PACKAGES) return
 
         val extras = sbn.notification.extras

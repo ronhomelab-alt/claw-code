@@ -18,6 +18,15 @@ import com.clawcode.smsfilter.core.Verdict
 class SmsDeliverReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        // A crash here would lose an incoming message; log and continue instead.
+        try {
+            handle(context, intent)
+        } catch (e: Exception) {
+            android.util.Log.e("SmsDeliverReceiver", "failed to process incoming SMS", e)
+        }
+    }
+
+    private fun handle(context: Context, intent: Intent) {
         if (intent.action != Telephony.Sms.Intents.SMS_DELIVER_ACTION) return
         val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent) ?: return
         if (messages.isEmpty()) return

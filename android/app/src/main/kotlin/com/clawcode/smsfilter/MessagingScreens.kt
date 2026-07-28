@@ -158,6 +158,7 @@ fun ThreadScreen(
     val tick by repository.changeTick.collectAsState()
     var messages by remember { mutableStateOf(emptyList<ThreadMessage>()) }
     var draft by remember { mutableStateOf("") }
+    var sendError by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(tick, threadId) {
@@ -187,6 +188,14 @@ fun ThreadScreen(
             ) {
                 items(messages, key = { it.id }) { message -> MessageBubble(message) }
             }
+            sendError?.let { error ->
+                Text(
+                    error,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                )
+            }
             Row(
                 Modifier.fillMaxWidth().padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -202,8 +211,13 @@ fun ThreadScreen(
                     onClick = {
                         val text = draft.trim()
                         if (text.isNotEmpty()) {
-                            repository.send(address, text)
-                            draft = ""
+                            when (val result = repository.send(address, text)) {
+                                is SendResult.Sent -> {
+                                    draft = ""
+                                    sendError = null
+                                }
+                                is SendResult.Failed -> sendError = result.reason
+                            }
                         }
                     },
                     enabled = draft.isNotBlank(),
@@ -273,6 +287,7 @@ fun NewMessageScreen(
 ) {
     var recipient by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
+    var sendError by remember { mutableStateOf<String?>(null) }
     var pickedContact by remember { mutableStateOf<ContactMatch?>(null) }
     val suggestions = remember(recipient, pickedContact) {
         if (pickedContact != null) emptyList() else repository.searchContacts(recipient)
@@ -302,8 +317,15 @@ fun NewMessageScreen(
                 },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("To (name or phone number)") },
-                supportingText = pickedContact?.let { picked ->
-                    { Text("${picked.name} — ${picked.number}") }
+                isError = sendError != null,
+                supportingText = when {
+                    sendError != null -> {
+                        { Text(sendError ?: "", color = MaterialTheme.colorScheme.error) }
+                    }
+                    pickedContact != null -> {
+                        { Text("${pickedContact?.name} — ${pickedContact?.number}") }
+                    }
+                    else -> null
                 },
             )
             suggestions.forEach { match ->
@@ -340,8 +362,13 @@ fun NewMessageScreen(
                         val to = recipient.trim()
                         val text = body.trim()
                         if (to.isNotEmpty() && text.isNotEmpty()) {
-                            val threadId = repository.send(to, text)
-                            onSent(threadId, to)
+                            when (val result = repository.send(to, text)) {
+                                is SendResult.Sent -> {
+                                    sendError = null
+                                    if (result.threadId >= 0) onSent(result.threadId, to) else onBack()
+                                }
+                                is SendResult.Failed -> sendError = result.reason
+                            }
                         }
                     },
                     enabled = recipient.isNotBlank() && body.isNotBlank(),
