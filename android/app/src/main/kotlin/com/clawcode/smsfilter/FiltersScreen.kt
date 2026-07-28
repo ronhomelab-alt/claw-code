@@ -246,6 +246,39 @@ private fun SetupTab(
             }
         }
 
+        if (!hasSendPermission(context)) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "SMS sending is blocked",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Text(
+                        "Android restricts SMS permissions for apps installed outside " +
+                            "the Play Store. Making this the default SMS app grants them " +
+                            "automatically (recommended). Or lift the restriction " +
+                            "manually: App info → ⋮ menu → \"Allow restricted settings\", " +
+                            "then allow SMS."
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = onRequestDefaultSmsRole) { Text("Make default") }
+                        TextButton(onClick = {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.provider.Settings
+                                        .ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    android.net.Uri.fromParts(
+                                        "package", context.packageName, null
+                                    ),
+                                )
+                            )
+                        }) { Text("Open App info") }
+                    }
+                }
+            }
+        }
+
         Text("Privacy & security", style = MaterialTheme.typography.titleMedium)
 
         Card(Modifier.fillMaxWidth()) {

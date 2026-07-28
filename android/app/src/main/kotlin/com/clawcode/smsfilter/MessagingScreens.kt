@@ -1,6 +1,11 @@
 package com.clawcode.smsfilter
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.text.format.DateUtils
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -42,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -147,6 +153,20 @@ private fun Avatar(name: String) {
     }
 }
 
+/**
+ * Guidance for the SEND_SMS restricted-permission wall: Android refuses to
+ * grant SMS sending to sideloaded apps unless the app is the default SMS app
+ * or the user lifts the restriction manually.
+ */
+internal const val SEND_PERMISSION_HELP =
+    "Android is blocking SMS sending for this app. Easiest fix: settings (gear icon) → " +
+        "Setup → \"Make default SMS app\". Alternative: long-press the app icon → " +
+        "App info → ⋮ menu → \"Allow restricted settings\", then grant SMS permission."
+
+internal fun hasSendPermission(context: android.content.Context): Boolean =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) ==
+        PackageManager.PERMISSION_GRANTED
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThreadScreen(
@@ -159,6 +179,12 @@ fun ThreadScreen(
     var messages by remember { mutableStateOf(emptyList<ThreadMessage>()) }
     var draft by remember { mutableStateOf("") }
     var sendError by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val sendPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        sendError = if (granted) null else SEND_PERMISSION_HELP
+    }
     val listState = rememberLazyListState()
 
     LaunchedEffect(tick, threadId) {
@@ -210,14 +236,18 @@ fun ThreadScreen(
                 IconButton(
                     onClick = {
                         val text = draft.trim()
-                        if (text.isNotEmpty()) {
-                            when (val result = repository.send(address, text)) {
-                                is SendResult.Sent -> {
-                                    draft = ""
-                                    sendError = null
-                                }
-                                is SendResult.Failed -> sendError = result.reason
+                        if (text.isEmpty()) return@IconButton
+                        if (!hasSendPermission(context)) {
+                            sendError = SEND_PERMISSION_HELP
+                            sendPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+                            return@IconButton
+                        }
+                        when (val result = repository.send(address, text)) {
+                            is SendResult.Sent -> {
+                                draft = ""
+                                sendError = null
                             }
+                            is SendResult.Failed -> sendError = result.reason
                         }
                     },
                     enabled = draft.isNotBlank(),
@@ -289,6 +319,12 @@ fun NewMessageScreen(
     var body by remember { mutableStateOf("") }
     var sendError by remember { mutableStateOf<String?>(null) }
     var pickedContact by remember { mutableStateOf<ContactMatch?>(null) }
+    val context = LocalContext.current
+    val sendPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        sendError = if (granted) null else SEND_PERMISSION_HELP
+    }
     val suggestions = remember(recipient, pickedContact) {
         if (pickedContact != null) emptyList() else repository.searchContacts(recipient)
     }
@@ -361,14 +397,18 @@ fun NewMessageScreen(
                     onClick = {
                         val to = recipient.trim()
                         val text = body.trim()
-                        if (to.isNotEmpty() && text.isNotEmpty()) {
-                            when (val result = repository.send(to, text)) {
-                                is SendResult.Sent -> {
-                                    sendError = null
-                                    if (result.threadId >= 0) onSent(result.threadId, to) else onBack()
-                                }
-                                is SendResult.Failed -> sendError = result.reason
+                        if (to.isEmpty() || text.isEmpty()) return@IconButton
+                        if (!hasSendPermission(context)) {
+                            sendError = SEND_PERMISSION_HELP
+                            sendPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+                            return@IconButton
+                        }
+                        when (val result = repository.send(to, text)) {
+                            is SendResult.Sent -> {
+                                sendError = null
+                                if (result.threadId >= 0) onSent(result.threadId, to) else onBack()
                             }
+                            is SendResult.Failed -> sendError = result.reason
                         }
                     },
                     enabled = recipient.isNotBlank() && body.isNotBlank(),
