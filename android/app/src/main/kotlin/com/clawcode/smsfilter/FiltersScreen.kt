@@ -80,7 +80,7 @@ fun FiltersScreen(
             }
             when (tab) {
                 0 -> RulesTab(ruleStore)
-                1 -> BlockedTab(blockedLog)
+                1 -> BlockedTab(blockedLog, ruleStore)
                 2 -> SetupTab(
                     settings,
                     isDefaultSmsApp,
@@ -180,8 +180,9 @@ private fun RuleRow(label: String, onDelete: () -> Unit) {
 }
 
 @Composable
-private fun BlockedTab(blockedLog: BlockedLog) {
+private fun BlockedTab(blockedLog: BlockedLog, ruleStore: RuleStore) {
     val entries by blockedLog.entries.collectAsState()
+    val rules by ruleStore.rules.collectAsState()
     val formatter = remember { DateFormat.getDateTimeInstance() }
 
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -199,6 +200,14 @@ private fun BlockedTab(blockedLog: BlockedLog) {
                                 "${formatter.format(Date(entry.timestampMs))} — ${entry.reason}",
                                 style = MaterialTheme.typography.bodySmall,
                             )
+                            val digits = PhoneNumbers.normalize(entry.sender)
+                            if (digits.isNotEmpty() && digits in rules.blockedNumbers) {
+                                TextButton(onClick = {
+                                    ruleStore.update {
+                                        it.copy(blockedNumbers = it.blockedNumbers - digits)
+                                    }
+                                }) { Text("Unblock this number") }
+                            }
                         }
                     }
                 }

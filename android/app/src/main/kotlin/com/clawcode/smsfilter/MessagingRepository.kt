@@ -68,18 +68,64 @@ class MessagingRepository(private val context: Context) {
         }
     }
 
+    /** Marks the newest incoming message of a thread unread. */
+    fun markThreadUnread(threadId: Long) {
+        try {
+            val latestInboxId = context.contentResolver.query(
+                Telephony.Sms.CONTENT_URI,
+                arrayOf(Telephony.Sms._ID),
+                "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.TYPE} = ${Telephony.Sms.MESSAGE_TYPE_INBOX}",
+                arrayOf(threadId.toString()),
+                "${Telephony.Sms.DATE} DESC LIMIT 1",
+            )?.use { if (it.moveToFirst()) it.getLong(0) else null } ?: return
+            val values = ContentValues().apply { put(Telephony.Sms.READ, 0) }
+            context.contentResolver.update(
+                Telephony.Sms.CONTENT_URI,
+                values,
+                "${Telephony.Sms._ID} = ?",
+                arrayOf(latestInboxId.toString()),
+            )
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "could not mark thread $threadId unread", e)
+        }
+    }
+
+    /** Deletes an entire conversation. Only works as the default SMS app. */
+    fun deleteThread(threadId: Long): Boolean = try {
+        context.contentResolver.delete(
+            Telephony.Sms.CONTENT_URI,
+            "${Telephony.Sms.THREAD_ID} = ?",
+            arrayOf(threadId.toString()),
+        ) >= 0
+    } catch (e: Exception) {
+        android.util.Log.w(TAG, "could not delete thread $threadId", e)
+        false
+    }
+
     private companion object {
         const val TAG = "MessagingRepository"
+
+        /** Rows scanned for the conversation list; covers snippets + recent unread. */
+        const val SCAN_LIMIT = 2000
+
+        /** Messages loaded per thread view. */
+        const val THREAD_LIMIT = 500
     }
 
     fun conversations(): List<Conversation> = try {
-        loadConversations()
+        // LIMIT keeps first paint fast on large mailboxes; most providers
+        // accept it in the sort clause. Fall back to a full scan if not.
+        loadConversations("${Telephony.Sms.DATE} DESC LIMIT $SCAN_LIMIT")
     } catch (e: Exception) {
-        android.util.Log.e(TAG, "failed to load conversations", e)
-        emptyList()
+        try {
+            loadConversations("${Telephony.Sms.DATE} DESC")
+        } catch (e2: Exception) {
+            android.util.Log.e(TAG, "failed to load conversations", e2)
+            emptyList()
+        }
     }
 
-    private fun loadConversations(): List<Conversation> {
+    private fun loadConversations(sortOrder: String): List<Conversation> {
         val byThread = LinkedHashMap<Long, Conversation>()
         context.contentResolver.query(
             Telephony.Sms.CONTENT_URI,
@@ -93,7 +139,7 @@ class MessagingRepository(private val context: Context) {
             ),
             null,
             null,
-            "${Telephony.Sms.DATE} DESC",
+            sortOrder,
         )?.use { cursor ->
             while (cursor.moveToNext()) {
                 val threadId = cursor.getLong(0)
@@ -125,13 +171,17 @@ class MessagingRepository(private val context: Context) {
     }
 
     fun messages(threadId: Long): List<ThreadMessage> = try {
-        loadMessages(threadId)
+        loadMessages(threadId, "${Telephony.Sms.DATE} DESC LIMIT $THREAD_LIMIT").asReversed()
     } catch (e: Exception) {
-        android.util.Log.e(TAG, "failed to load thread $threadId", e)
-        emptyList()
+        try {
+            loadMessages(threadId, "${Telephony.Sms.DATE} DESC").asReversed()
+        } catch (e2: Exception) {
+            android.util.Log.e(TAG, "failed to load thread $threadId", e2)
+            emptyList()
+        }
     }
 
-    private fun loadMessages(threadId: Long): List<ThreadMessage> {
+    private fun loadMessages(threadId: Long, sortOrder: String): List<ThreadMessage> {
         val result = mutableListOf<ThreadMessage>()
         context.contentResolver.query(
             Telephony.Sms.CONTENT_URI,
@@ -144,7 +194,7 @@ class MessagingRepository(private val context: Context) {
             ),
             "${Telephony.Sms.THREAD_ID} = ?",
             arrayOf(threadId.toString()),
-            "${Telephony.Sms.DATE} ASC",
+            sortOrder,
         )?.use { cursor ->
             while (cursor.moveToNext()) {
                 result += ThreadMessage(

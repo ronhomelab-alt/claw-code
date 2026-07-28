@@ -80,6 +80,8 @@ class MainActivity : ComponentActivity() {
                 when (val current = screen) {
                     is Screen.Conversations -> ConversationsScreen(
                         repository = app.messagingRepository,
+                        ruleStore = app.ruleStore,
+                        blockedLog = app.blockedLog,
                         onOpenThread = {
                             screen = Screen.Thread(it.threadId, it.address)
                         },
@@ -88,6 +90,8 @@ class MainActivity : ComponentActivity() {
                     )
                     is Screen.Thread -> ThreadScreen(
                         repository = app.messagingRepository,
+                        ruleStore = app.ruleStore,
+                        blockedLog = app.blockedLog,
                         threadId = current.threadId,
                         address = current.address,
                         onBack = { screen = Screen.Conversations },

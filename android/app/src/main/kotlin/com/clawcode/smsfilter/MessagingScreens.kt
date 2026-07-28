@@ -27,7 +27,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -35,15 +41,23 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,18 +65,67 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.clawcode.smsfilter.core.PhoneNumbers
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationsScreen(
     repository: MessagingRepository,
+    ruleStore: RuleStore,
+    blockedLog: BlockedLog,
     onOpenThread: (Conversation) -> Unit,
     onNewMessage: () -> Unit,
     onOpenFilters: () -> Unit,
 ) {
     val tick by repository.changeTick.collectAsState()
-    var conversations by remember { mutableStateOf(emptyList<Conversation>()) }
-    LaunchedEffect(tick) { conversations = repository.conversations() }
+    val rules by ruleStore.rules.collectAsState()
+    // null = still loading (distinct from "no conversations")
+    var conversations by remember { mutableStateOf<List<Conversation>?>(null) }
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(tick) {
+        conversations = withContext(Dispatchers.IO) { repository.conversations() }
+    }
+
+    fun blockConversation(conversation: Conversation) {
+        val digits = PhoneNumbers.normalize(conversation.address)
+        if (digits.isEmpty()) return
+        ruleStore.update { it.copy(blockedNumbers = it.blockedNumbers + digits) }
+        blockedLog.append(
+            BlockedMessage(
+                timestampMs = System.currentTimeMillis(),
+                sender = conversation.address,
+                body = conversation.snippet,
+                reason = "number blocked by swipe",
+            )
+        )
+        scope.launch {
+            val result = snackbarHostState.showSnackbar(
+                message = "Blocked ${conversation.displayName}",
+                actionLabel = "Undo",
+                withDismissAction = true,
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                ruleStore.update { it.copy(blockedNumbers = it.blockedNumbers - digits) }
+            }
+        }
+    }
+
+    fun toggleRead(conversation: Conversation) {
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                if (conversation.unreadCount > 0) {
+                    repository.markThreadRead(conversation.threadId)
+                } else {
+                    repository.markThreadUnread(conversation.threadId)
+                }
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -75,20 +138,49 @@ fun ConversationsScreen(
                 },
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             FloatingActionButton(onClick = onNewMessage) {
                 Icon(Icons.Default.Add, contentDescription = "Start chat")
             }
         },
     ) { padding ->
-        if (conversations.isEmpty()) {
-            Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No conversations yet")
-            }
-        } else {
-            LazyColumn(Modifier.padding(padding).fillMaxSize()) {
-                items(conversations, key = { it.threadId }) { conversation ->
-                    ConversationRow(conversation) { onOpenThread(conversation) }
+        val list = conversations
+        when {
+            list == null -> Box(
+                Modifier.padding(padding).fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) { CircularProgressIndicator() }
+
+            list.isEmpty() -> Box(
+                Modifier.padding(padding).fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) { Text("No conversations yet") }
+
+            else -> LazyColumn(Modifier.padding(padding).fillMaxSize()) {
+                items(list, key = { it.threadId }) { conversation ->
+                    val dismissState = rememberSwipeToDismissBoxState(
+                        confirmValueChange = { value ->
+                            when (value) {
+                                SwipeToDismissBoxValue.StartToEnd -> blockConversation(conversation)
+                                SwipeToDismissBoxValue.EndToStart -> toggleRead(conversation)
+                                else -> Unit
+                            }
+                            false // never remove the row; swipe acts, then snaps back
+                        },
+                    )
+                    SwipeToDismissBox(
+                        state = dismissState,
+                        backgroundContent = { SwipeActionBackground(dismissState.dismissDirection) },
+                    ) {
+                        Surface(color = MaterialTheme.colorScheme.surface) {
+                            ConversationRow(
+                                conversation = conversation,
+                                isBlocked = PhoneNumbers.normalize(conversation.address) in
+                                    rules.blockedNumbers,
+                            ) { onOpenThread(conversation) }
+                        }
+                    }
                 }
             }
         }
@@ -96,7 +188,28 @@ fun ConversationsScreen(
 }
 
 @Composable
-private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
+private fun SwipeActionBackground(direction: SwipeToDismissBoxValue) {
+    val (color, label, alignment) = when (direction) {
+        SwipeToDismissBoxValue.StartToEnd ->
+            Triple(MaterialTheme.colorScheme.errorContainer, "Block", Alignment.CenterStart)
+        SwipeToDismissBoxValue.EndToStart ->
+            Triple(MaterialTheme.colorScheme.primaryContainer, "Read/Unread", Alignment.CenterEnd)
+        else -> return
+    }
+    Box(
+        Modifier.fillMaxSize().background(color).padding(horizontal = 24.dp),
+        contentAlignment = alignment,
+    ) {
+        Text(label, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun ConversationRow(
+    conversation: Conversation,
+    isBlocked: Boolean = false,
+    onClick: () -> Unit,
+) {
     val unread = conversation.unreadCount > 0
     Row(
         Modifier
@@ -107,13 +220,24 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
     ) {
         Avatar(conversation.displayName)
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            Text(
-                conversation.displayName,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = if (unread) FontWeight.Bold else FontWeight.Normal,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    conversation.displayName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = if (unread) FontWeight.Bold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (isBlocked) {
+                    Text(
+                        "Blocked",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
+                }
+            }
             Text(
                 conversation.snippet,
                 style = MaterialTheme.typography.bodyMedium,
@@ -171,6 +295,8 @@ internal fun hasSendPermission(context: android.content.Context): Boolean =
 @Composable
 fun ThreadScreen(
     repository: MessagingRepository,
+    ruleStore: RuleStore,
+    blockedLog: BlockedLog,
     threadId: Long,
     address: String,
     onBack: () -> Unit,
@@ -180,6 +306,12 @@ fun ThreadScreen(
     var draft by remember { mutableStateOf("") }
     var sendError by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    var menuOpen by remember { mutableStateOf(false) }
+    var showBlockTextDialog by remember { mutableStateOf(false) }
+    var blockTextInput by remember { mutableStateOf("") }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     val sendPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -188,9 +320,101 @@ fun ThreadScreen(
     val listState = rememberLazyListState()
 
     LaunchedEffect(tick, threadId) {
-        messages = repository.messages(threadId)
-        repository.markThreadRead(threadId)
+        messages = withContext(Dispatchers.IO) {
+            repository.messages(threadId).also { repository.markThreadRead(threadId) }
+        }
         if (messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex)
+    }
+
+    fun blockNumber() {
+        val digits = PhoneNumbers.normalize(address)
+        if (digits.isEmpty()) return
+        ruleStore.update { it.copy(blockedNumbers = it.blockedNumbers + digits) }
+        blockedLog.append(
+            BlockedMessage(
+                timestampMs = System.currentTimeMillis(),
+                sender = address,
+                body = messages.lastOrNull { !it.isOutgoing }?.body ?: "",
+                reason = "number blocked from conversation",
+            )
+        )
+        scope.launch {
+            val result = snackbarHostState.showSnackbar(
+                message = "Blocked $address",
+                actionLabel = "Undo",
+                withDismissAction = true,
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                ruleStore.update { it.copy(blockedNumbers = it.blockedNumbers - digits) }
+            }
+        }
+    }
+
+    if (showBlockTextDialog) {
+        AlertDialog(
+            onDismissRequest = { showBlockTextDialog = false },
+            title = { Text("Block messages containing…") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Any message containing this text will be blocked, from any " +
+                            "number. Case, spacing, and digit-for-letter tricks are ignored."
+                    )
+                    OutlinedTextField(
+                        value = blockTextInput,
+                        onValueChange = { blockTextInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Text to block") },
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val value = blockTextInput.trim()
+                        if (value.isNotEmpty()) {
+                            ruleStore.update {
+                                it.copy(textRules = (it.textRules + value).distinct())
+                            }
+                            showBlockTextDialog = false
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Blocking texts containing \"$value\"")
+                            }
+                        }
+                    },
+                    enabled = blockTextInput.isNotBlank(),
+                ) { Text("Block") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBlockTextDialog = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete conversation?") },
+            text = { Text("This deletes the whole conversation from your phone. It cannot be undone.") },
+            confirmButton = {
+                Button(onClick = {
+                    showDeleteConfirm = false
+                    scope.launch {
+                        val deleted = withContext(Dispatchers.IO) { repository.deleteThread(threadId) }
+                        if (deleted) {
+                            onBack()
+                        } else {
+                            snackbarHostState.showSnackbar(
+                                "Couldn't delete — this app must be the default SMS app"
+                            )
+                        }
+                    }
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+            },
+        )
     }
 
     Scaffold(
@@ -202,8 +426,38 @@ fun ThreadScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Conversation options")
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Block number") },
+                            onClick = {
+                                menuOpen = false
+                                blockNumber()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Block text…") },
+                            onClick = {
+                                menuOpen = false
+                                blockTextInput = messages.lastOrNull { !it.isOutgoing }?.body ?: ""
+                                showBlockTextDialog = true
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete conversation") },
+                            onClick = {
+                                menuOpen = false
+                                showDeleteConfirm = true
+                            },
+                        )
+                    }
+                },
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().imePadding()) {
             LazyColumn(
