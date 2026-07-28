@@ -5,3 +5,8 @@ archive/
 # Claude Code local artifacts
 .claude/settings.local.json
 .claude/sessions/
+# Android/Gradle build artifacts
+android/.gradle/
+android/build/
+android/*/build/
+android/local.properties
