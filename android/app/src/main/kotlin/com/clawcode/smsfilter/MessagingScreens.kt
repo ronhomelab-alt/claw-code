@@ -37,7 +37,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -601,7 +600,7 @@ internal fun ConversationRow(
             if (!selectionMode && onStarToggle != null) {
                 IconButton(onClick = onStarToggle, modifier = Modifier.size(28.dp)) {
                     Icon(
-                        if (meta.starred) Icons.Default.Star else Icons.Default.StarBorder,
+                        if (meta.starred) Icons.Default.Star else Icons.Default.Star,
                         contentDescription = if (meta.starred) "Unstar" else "Star",
                         tint = if (meta.starred) MaterialTheme.colorScheme.tertiary
                         else MaterialTheme.colorScheme.outline,
@@ -798,7 +797,7 @@ fun ThreadScreen(
                 actions = {
                     IconButton(onClick = { metaStore.toggleStar(address) }) {
                         Icon(
-                            if (meta.starred) Icons.Default.Star else Icons.Default.StarBorder,
+                            if (meta.starred) Icons.Default.Star else Icons.Default.Star,
                             contentDescription = if (meta.starred) "Unstar" else "Star",
                             tint = if (meta.starred) MaterialTheme.colorScheme.tertiary
                             else androidx.compose.material3.LocalContentColor.current,
