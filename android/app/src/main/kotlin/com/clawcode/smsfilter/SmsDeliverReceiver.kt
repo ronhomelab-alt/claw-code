@@ -37,6 +37,11 @@ class SmsDeliverReceiver : BroadcastReceiver() {
 
         when (val verdict = app.ruleStore.engine().evaluate(sender, body)) {
             is Verdict.Block -> {
+                // Quarantine, Google-Messages-style: the message is stored
+                // (marked read, no notification) so the Blocked screen shows
+                // a real, replyable conversation — but the inbox never
+                // surfaces it and the user is never interrupted.
+                writeToInbox(context, sender, body, read = true)
                 app.blockedLog.append(
                     BlockedMessage(
                         timestampMs = System.currentTimeMillis(),
@@ -47,7 +52,7 @@ class SmsDeliverReceiver : BroadcastReceiver() {
                 )
             }
             is Verdict.Allow -> {
-                val threadId = writeToInbox(context, sender, body)
+                val threadId = writeToInbox(context, sender, body, read = false)
                 Notifications.notifyIncoming(
                     context = context,
                     threadId = threadId,
@@ -59,12 +64,18 @@ class SmsDeliverReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun writeToInbox(context: Context, sender: String, body: String): Long {
+    private fun writeToInbox(
+        context: Context,
+        sender: String,
+        body: String,
+        read: Boolean,
+    ): Long {
         val values = ContentValues().apply {
             put(Telephony.Sms.ADDRESS, sender)
             put(Telephony.Sms.BODY, body)
             put(Telephony.Sms.DATE, System.currentTimeMillis())
-            put(Telephony.Sms.READ, 0)
+            put(Telephony.Sms.READ, if (read) 1 else 0)
+            if (read) put(Telephony.Sms.SEEN, 1)
         }
         context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values)
         return Telephony.Threads.getOrCreateThreadId(context, sender)

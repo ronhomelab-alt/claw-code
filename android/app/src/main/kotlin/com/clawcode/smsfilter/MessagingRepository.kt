@@ -90,6 +90,24 @@ class MessagingRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Auto-delete: removes messages older than [cutoffMs] from the given
+     * spam threads, and drops any of those threads left empty.
+     */
+    fun purgeSpamThreadsOlderThan(threadIds: Collection<Long>, cutoffMs: Long) {
+        for (threadId in threadIds) {
+            try {
+                context.contentResolver.delete(
+                    Telephony.Sms.CONTENT_URI,
+                    "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.DATE} < ?",
+                    arrayOf(threadId.toString(), cutoffMs.toString()),
+                )
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "auto-delete failed for thread $threadId", e)
+            }
+        }
+    }
+
     /** Deletes an entire conversation. Only works as the default SMS app. */
     fun deleteThread(threadId: Long): Boolean = try {
         context.contentResolver.delete(

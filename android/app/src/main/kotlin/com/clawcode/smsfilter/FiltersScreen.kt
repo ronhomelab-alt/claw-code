@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -28,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -39,8 +41,8 @@ import androidx.compose.ui.unit.dp
 import com.clawcode.smsfilter.core.NumberPattern
 import com.clawcode.smsfilter.core.PhoneNumbers
 import com.clawcode.smsfilter.core.RuleSet
-import java.text.DateFormat
-import java.util.Date
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,9 +50,11 @@ fun FiltersScreen(
     ruleStore: RuleStore,
     blockedLog: BlockedLog,
     settings: AppSettings,
+    repository: MessagingRepository,
     isDefaultSmsApp: () -> Boolean,
     onRequestDefaultSmsRole: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
+    onOpenThread: (Conversation) -> Unit,
     onBack: () -> Unit,
 ) {
     var tab by remember { mutableIntStateOf(0) }
@@ -80,7 +84,7 @@ fun FiltersScreen(
             }
             when (tab) {
                 0 -> RulesTab(ruleStore)
-                1 -> BlockedTab(blockedLog, ruleStore)
+                1 -> BlockedTab(blockedLog, ruleStore, repository, settings, onOpenThread)
                 2 -> SetupTab(
                     settings,
                     isDefaultSmsApp,
@@ -179,36 +183,99 @@ private fun RuleRow(label: String, onDelete: () -> Unit) {
     }
 }
 
+/**
+ * Spam & blocked, Google-Messages-style: blocked senders appear as real
+ * conversations — tappable, readable, replyable — hidden from the main list.
+ */
 @Composable
-private fun BlockedTab(blockedLog: BlockedLog, ruleStore: RuleStore) {
-    val entries by blockedLog.entries.collectAsState()
+private fun BlockedTab(
+    blockedLog: BlockedLog,
+    ruleStore: RuleStore,
+    repository: MessagingRepository,
+    settings: AppSettings,
+    onOpenThread: (Conversation) -> Unit,
+) {
     val rules by ruleStore.rules.collectAsState()
-    val formatter = remember { DateFormat.getDateTimeInstance() }
+    val logEntries by blockedLog.entries.collectAsState()
+    val tick by repository.changeTick.collectAsState()
+    var all by remember { mutableStateOf<List<Conversation>?>(null) }
+    var autoDeleteDays by remember { mutableIntStateOf(settings.autoDeleteBlockedDays) }
+
+    LaunchedEffect(tick) {
+        all = withContext(Dispatchers.IO) { repository.conversations() }
+    }
+
+    val spam = rules.blockedNumbers + blockedLog.senders()
+    val blockedConversations = all.orEmpty().filter {
+        PhoneNumbers.normalize(it.address) in spam
+    }
+    // Log entries with no surviving conversation (e.g. auto-deleted thread).
+    val logOnlySenders = logEntries
+        .filter { entry ->
+            val digits = PhoneNumbers.normalize(entry.sender)
+            blockedConversations.none { PhoneNumbers.normalize(it.address) == digits }
+        }
+        .groupBy { PhoneNumbers.normalize(it.sender) }
 
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (entries.isEmpty()) {
-            Text("Nothing blocked yet.")
+        Text("Auto-delete blocked messages", style = MaterialTheme.typography.titleSmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AppSettings.AUTO_DELETE_CHOICES.forEach { (label, days) ->
+                FilterChip(
+                    selected = autoDeleteDays == days,
+                    onClick = {
+                        settings.autoDeleteBlockedDays = days
+                        autoDeleteDays = days
+                    },
+                    label = { Text(label) },
+                )
+            }
+        }
+        Text(
+            "Runs when the app opens; deletes blocked conversations' messages " +
+                "older than the chosen age.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        HorizontalDivider()
+
+        if (all == null) {
+            Text("Loading…")
+        } else if (blockedConversations.isEmpty() && logOnlySenders.isEmpty()) {
+            Text("No blocked conversations.")
         } else {
-            TextButton(onClick = { blockedLog.clear() }) { Text("Clear log") }
             LazyColumn(Modifier.fillMaxSize()) {
-                items(entries.asReversed()) { entry ->
-                    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text(entry.sender, style = MaterialTheme.typography.titleSmall)
-                            Text(entry.body, style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "${formatter.format(Date(entry.timestampMs))} — ${entry.reason}",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            val digits = PhoneNumbers.normalize(entry.sender)
-                            if (digits.isNotEmpty() && digits in rules.blockedNumbers) {
-                                TextButton(onClick = {
-                                    ruleStore.update {
-                                        it.copy(blockedNumbers = it.blockedNumbers - digits)
-                                    }
-                                }) { Text("Unblock this number") }
-                            }
+                items(blockedConversations, key = { it.threadId }) { conversation ->
+                    Column {
+                        ConversationRow(
+                            conversation = conversation,
+                            isBlocked = true,
+                            onClick = { onOpenThread(conversation) },
+                        )
+                        Row {
+                            TextButton(onClick = {
+                                val digits = PhoneNumbers.normalize(conversation.address)
+                                ruleStore.update {
+                                    it.copy(blockedNumbers = it.blockedNumbers - digits)
+                                }
+                                blockedLog.removeSender(digits)
+                            }) { Text("Not spam") }
                         }
+                        HorizontalDivider()
+                    }
+                }
+                items(logOnlySenders.entries.toList(), key = { it.key }) { (digits, entries) ->
+                    val latest = entries.maxBy { it.timestampMs }
+                    Column {
+                        Text(latest.sender, style = MaterialTheme.typography.titleSmall)
+                        Text(latest.body, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
+                        Text(latest.reason, style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = {
+                            ruleStore.update {
+                                it.copy(blockedNumbers = it.blockedNumbers - digits)
+                            }
+                            blockedLog.removeSender(digits)
+                        }) { Text("Not spam") }
+                        HorizontalDivider()
                     }
                 }
             }

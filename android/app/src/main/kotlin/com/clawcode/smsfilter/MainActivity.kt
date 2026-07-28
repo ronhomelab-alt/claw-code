@@ -82,6 +82,7 @@ class MainActivity : ComponentActivity() {
                         repository = app.messagingRepository,
                         ruleStore = app.ruleStore,
                         blockedLog = app.blockedLog,
+                        settings = app.settings,
                         onOpenThread = {
                             screen = Screen.Thread(it.threadId, it.address)
                         },
@@ -107,12 +108,16 @@ class MainActivity : ComponentActivity() {
                         ruleStore = app.ruleStore,
                         blockedLog = app.blockedLog,
                         settings = app.settings,
+                        repository = app.messagingRepository,
                         isDefaultSmsApp = { isDefaultSmsApp() },
                         onRequestDefaultSmsRole = { requestDefaultSmsRole() },
                         onOpenNotificationAccess = {
                             startActivity(
                                 Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
                             )
+                        },
+                        onOpenThread = {
+                            screen = Screen.Thread(it.threadId, it.address)
                         },
                         onBack = { screen = Screen.Conversations },
                     )

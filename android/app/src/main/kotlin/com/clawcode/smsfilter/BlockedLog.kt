@@ -37,6 +37,35 @@ class BlockedLog(context: Context) {
         _entries.value = emptyList()
     }
 
+    /** Normalized digits of every sender with a quarantine entry. */
+    fun senders(): Set<String> =
+        _entries.value.mapNotNull {
+            com.clawcode.smsfilter.core.PhoneNumbers.normalize(it.sender)
+                .ifEmpty { null }
+        }.toSet()
+
+    /** Drops all entries for [digits] (normalized) — the "not spam" path. */
+    @Synchronized
+    fun removeSender(digits: String) {
+        val next = _entries.value.filterNot {
+            com.clawcode.smsfilter.core.PhoneNumbers.normalize(it.sender) == digits
+        }
+        if (next.size != _entries.value.size) {
+            file.writeText(next.joinToString("\n") { encode(it) })
+            _entries.value = next
+        }
+    }
+
+    /** Auto-delete support: drops entries older than [cutoffMs]. */
+    @Synchronized
+    fun purgeOlderThan(cutoffMs: Long) {
+        val next = _entries.value.filter { it.timestampMs >= cutoffMs }
+        if (next.size != _entries.value.size) {
+            file.writeText(next.joinToString("\n") { encode(it) })
+            _entries.value = next
+        }
+    }
+
     private fun load(): List<BlockedMessage> =
         if (!file.exists()) emptyList()
         else file.readLines().mapNotNull { decode(it) }

@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,25 +71,56 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** Senders considered spam: blocklisted numbers plus anyone in the quarantine log. */
+internal fun spamSenders(
+    blockedNumbers: Set<String>,
+    blockedLog: BlockedLog,
+): Set<String> = blockedNumbers + blockedLog.senders()
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationsScreen(
     repository: MessagingRepository,
     ruleStore: RuleStore,
     blockedLog: BlockedLog,
+    settings: AppSettings,
     onOpenThread: (Conversation) -> Unit,
     onNewMessage: () -> Unit,
     onOpenFilters: () -> Unit,
 ) {
     val tick by repository.changeTick.collectAsState()
     val rules by ruleStore.rules.collectAsState()
+    val logEntries by blockedLog.entries.collectAsState()
     // null = still loading (distinct from "no conversations")
-    var conversations by remember { mutableStateOf<List<Conversation>?>(null) }
+    var allConversations by remember { mutableStateOf<List<Conversation>?>(null) }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    var actionTarget by remember { mutableStateOf<Conversation?>(null) }
+    var deleteTarget by remember { mutableStateOf<Conversation?>(null) }
+    var purgedThisSession by remember { mutableStateOf(false) }
+
+    val spam = remember(rules.blockedNumbers, logEntries) {
+        spamSenders(rules.blockedNumbers, blockedLog)
+    }
+    val conversations = allConversations?.filterNot {
+        PhoneNumbers.normalize(it.address) in spam
+    }
 
     LaunchedEffect(tick) {
-        conversations = withContext(Dispatchers.IO) { repository.conversations() }
+        allConversations = withContext(Dispatchers.IO) { repository.conversations() }
+        // Run auto-delete once per app session, after the first load.
+        val days = settings.autoDeleteBlockedDays
+        if (!purgedThisSession && days > 0) {
+            purgedThisSession = true
+            val cutoff = System.currentTimeMillis() - days * 24L * 60 * 60 * 1000
+            withContext(Dispatchers.IO) {
+                val spamThreads = allConversations.orEmpty()
+                    .filter { PhoneNumbers.normalize(it.address) in spam }
+                    .map { it.threadId }
+                repository.purgeSpamThreadsOlderThan(spamThreads, cutoff)
+                blockedLog.purgeOlderThan(cutoff)
+            }
+        }
     }
 
     fun blockConversation(conversation: Conversation) {
@@ -111,6 +143,7 @@ fun ConversationsScreen(
             )
             if (result == SnackbarResult.ActionPerformed) {
                 ruleStore.update { it.copy(blockedNumbers = it.blockedNumbers - digits) }
+                blockedLog.removeSender(digits)
             }
         }
     }
@@ -125,6 +158,55 @@ fun ConversationsScreen(
                 }
             }
         }
+    }
+
+    // Long-press action sheet: Block / Delete / Cancel.
+    actionTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { actionTarget = null },
+            title = { Text(target.displayName) },
+            text = {
+                Column {
+                    TextButton(onClick = {
+                        actionTarget = null
+                        blockConversation(target)
+                    }) { Text("Block sender") }
+                    TextButton(onClick = {
+                        actionTarget = null
+                        deleteTarget = target
+                    }) { Text("Delete conversation") }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { actionTarget = null }) { Text("Cancel") }
+            },
+        )
+    }
+
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Delete conversation with ${target.displayName}?") },
+            text = { Text("This permanently removes it from your phone.") },
+            confirmButton = {
+                Button(onClick = {
+                    deleteTarget = null
+                    scope.launch {
+                        val deleted =
+                            withContext(Dispatchers.IO) { repository.deleteThread(target.threadId) }
+                        if (!deleted) {
+                            snackbarHostState.showSnackbar(
+                                "Couldn't delete — this app must be the default SMS app"
+                            )
+                        }
+                    }
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("Cancel") }
+            },
+        )
     }
 
     Scaffold(
@@ -176,9 +258,9 @@ fun ConversationsScreen(
                         Surface(color = MaterialTheme.colorScheme.surface) {
                             ConversationRow(
                                 conversation = conversation,
-                                isBlocked = PhoneNumbers.normalize(conversation.address) in
-                                    rules.blockedNumbers,
-                            ) { onOpenThread(conversation) }
+                                onClick = { onOpenThread(conversation) },
+                                onLongClick = { actionTarget = conversation },
+                            )
                         }
                     }
                 }
@@ -204,17 +286,19 @@ private fun SwipeActionBackground(direction: SwipeToDismissBoxValue) {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun ConversationRow(
+internal fun ConversationRow(
     conversation: Conversation,
     isBlocked: Boolean = false,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val unread = conversation.unreadCount > 0
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -346,6 +430,7 @@ fun ThreadScreen(
             )
             if (result == SnackbarResult.ActionPerformed) {
                 ruleStore.update { it.copy(blockedNumbers = it.blockedNumbers - digits) }
+                blockedLog.removeSender(digits)
             }
         }
     }
@@ -572,15 +657,40 @@ fun NewMessageScreen(
     var recipient by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
     var sendError by remember { mutableStateOf<String?>(null) }
-    var pickedContact by remember { mutableStateOf<ContactMatch?>(null) }
+    var recipients by remember { mutableStateOf(listOf<ContactMatch>()) }
     val context = LocalContext.current
     val sendPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         sendError = if (granted) null else SEND_PERMISSION_HELP
     }
-    val suggestions = remember(recipient, pickedContact) {
-        if (pickedContact != null) emptyList() else repository.searchContacts(recipient)
+    val suggestions = remember(recipient) { repository.searchContacts(recipient) }
+
+    fun addRecipient(match: ContactMatch) {
+        val digits = PhoneNumbers.normalize(match.number)
+        if (recipients.none { PhoneNumbers.normalize(it.number) == digits }) {
+            recipients = recipients + match
+        }
+        recipient = ""
+    }
+
+    /** Turns the currently typed token into a recipient chip. */
+    fun commitTypedToken(): Boolean {
+        val token = recipient.trim().trimEnd(',').trim()
+        if (token.isEmpty()) return true
+        return if (token.any { it.isLetter() }) {
+            val match = repository.searchContacts(token).firstOrNull()
+            if (match == null) {
+                sendError = "No contact found for \"$token\""
+                false
+            } else {
+                addRecipient(match)
+                true
+            }
+        } else {
+            addRecipient(ContactMatch(name = token, number = token))
+            true
+        }
     }
 
     Scaffold(
@@ -599,31 +709,37 @@ fun NewMessageScreen(
             Modifier.padding(padding).padding(16.dp).fillMaxSize().imePadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (recipients.isNotEmpty()) {
+                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    recipients.forEach { chip ->
+                        androidx.compose.material3.InputChip(
+                            selected = false,
+                            onClick = { recipients = recipients - chip },
+                            label = { Text(chip.name) },
+                        )
+                    }
+                }
+            }
             OutlinedTextField(
                 value = recipient,
-                onValueChange = {
-                    recipient = it
-                    pickedContact = null
+                onValueChange = { value ->
+                    sendError = null
+                    recipient = value
+                    if (value.endsWith(",")) commitTypedToken()
                 },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("To (name or phone number)") },
+                label = { Text("To — separate several people with commas") },
                 isError = sendError != null,
-                supportingText = when {
-                    sendError != null -> {
-                        { Text(sendError ?: "", color = MaterialTheme.colorScheme.error) }
-                    }
-                    pickedContact != null -> {
-                        { Text("${pickedContact?.name} — ${pickedContact?.number}") }
-                    }
-                    else -> null
+                supportingText = sendError?.let { err ->
+                    { Text(err, color = MaterialTheme.colorScheme.error) }
                 },
             )
             suggestions.forEach { match ->
                 Surface(
-                    onClick = {
-                        recipient = match.number
-                        pickedContact = match
-                    },
+                    onClick = { addRecipient(match) },
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     modifier = Modifier.fillMaxWidth(),
@@ -649,23 +765,42 @@ fun NewMessageScreen(
             Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                 IconButton(
                     onClick = {
-                        val to = recipient.trim()
                         val text = body.trim()
-                        if (to.isEmpty() || text.isEmpty()) return@IconButton
+                        if (text.isEmpty()) return@IconButton
+                        if (!commitTypedToken()) return@IconButton
+                        if (recipients.isEmpty()) {
+                            sendError = "Add at least one recipient"
+                            return@IconButton
+                        }
                         if (!hasSendPermission(context)) {
                             sendError = SEND_PERMISSION_HELP
                             sendPermissionLauncher.launch(Manifest.permission.SEND_SMS)
                             return@IconButton
                         }
-                        when (val result = repository.send(to, text)) {
-                            is SendResult.Sent -> {
-                                sendError = null
-                                if (result.threadId >= 0) onSent(result.threadId, to) else onBack()
+                        // Group send = one SMS per person (like Google
+                        // Messages' mass text without MMS/RCS).
+                        var lastThreadId = -1L
+                        var lastAddress = ""
+                        var failure: String? = null
+                        for (chip in recipients) {
+                            when (val result = repository.send(chip.number, text)) {
+                                is SendResult.Sent -> {
+                                    lastThreadId = result.threadId
+                                    lastAddress = chip.number
+                                }
+                                is SendResult.Failed ->
+                                    failure = "${chip.name}: ${result.reason}"
                             }
-                            is SendResult.Failed -> sendError = result.reason
+                        }
+                        when {
+                            failure != null -> sendError = failure
+                            recipients.size == 1 && lastThreadId >= 0 ->
+                                onSent(lastThreadId, lastAddress)
+                            else -> onBack()
                         }
                     },
-                    enabled = recipient.isNotBlank() && body.isNotBlank(),
+                    enabled = body.isNotBlank() &&
+                        (recipients.isNotEmpty() || recipient.isNotBlank()),
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
                 }
