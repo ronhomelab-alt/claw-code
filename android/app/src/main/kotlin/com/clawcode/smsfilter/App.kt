@@ -10,10 +10,14 @@ class App : Application() {
     lateinit var blockedLog: BlockedLog
         private set
 
+    lateinit var messagingRepository: MessagingRepository
+        private set
+
     override fun onCreate() {
         super.onCreate()
         ruleStore = RuleStore(this)
         blockedLog = BlockedLog(this)
+        messagingRepository = MessagingRepository(this)
     }
 
     companion object {

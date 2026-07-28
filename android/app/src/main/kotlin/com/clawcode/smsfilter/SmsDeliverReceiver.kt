@@ -1,14 +1,10 @@
 package com.clawcode.smsfilter
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.provider.Telephony
-import androidx.core.app.NotificationCompat
 import com.clawcode.smsfilter.core.Verdict
 
 /**
@@ -42,13 +38,19 @@ class SmsDeliverReceiver : BroadcastReceiver() {
                 )
             }
             is Verdict.Allow -> {
-                writeToInbox(context, sender, body)
-                notify(context, sender, body)
+                val threadId = writeToInbox(context, sender, body)
+                Notifications.notifyIncoming(
+                    context = context,
+                    threadId = threadId,
+                    address = sender,
+                    displayName = app.messagingRepository.displayName(sender),
+                    body = body,
+                )
             }
         }
     }
 
-    private fun writeToInbox(context: Context, sender: String, body: String) {
+    private fun writeToInbox(context: Context, sender: String, body: String): Long {
         val values = ContentValues().apply {
             put(Telephony.Sms.ADDRESS, sender)
             put(Telephony.Sms.BODY, body)
@@ -56,30 +58,6 @@ class SmsDeliverReceiver : BroadcastReceiver() {
             put(Telephony.Sms.READ, 0)
         }
         context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values)
-    }
-
-    private fun notify(context: Context, sender: String, body: String) {
-        val manager = context.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Messages", NotificationManager.IMPORTANCE_HIGH)
-        )
-        val contentIntent = PendingIntent.getActivity(
-            context,
-            0,
-            Intent(context, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.sym_action_chat)
-            .setContentTitle(sender)
-            .setContentText(body)
-            .setContentIntent(contentIntent)
-            .setAutoCancel(true)
-            .build()
-        manager.notify(sender.hashCode(), notification)
-    }
-
-    companion object {
-        private const val CHANNEL_ID = "incoming_sms"
+        return Telephony.Threads.getOrCreateThreadId(context, sender)
     }
 }

@@ -50,9 +50,21 @@ days — but you can import a current community blocklist as a rules file.
 
 - `filtercore/` — pure-JVM Kotlin module: matching engine, rule parsing,
   serialization, seed rules. Fully unit-tested; no Android SDK required.
-- `app/` — the Android app: receivers/services for the default-SMS-app role,
-  the notification listener for companion mode, and a Compose UI
-  (rules editor, blocked-message log, setup screen).
+- `app/` — the Android app: a Google-Messages-style SMS client (conversation
+  list, chat-bubble threads, contact names, direct-reply notifications,
+  mark-as-read) plus the receivers/services for the default-SMS-app role, the
+  notification listener for companion mode, and the filter settings UI
+  (rules editor, blocked-message log, mode setup).
+
+Both modes ship in the one app: when it holds the default-SMS-app role the
+`SMS_DELIVER` receiver quarantines spam before it reaches any inbox; when it
+doesn't, the notification listener screens Google Messages' notifications.
+
+**What can't be cloned from Google Messages:** RCS ("chat features" — typing
+indicators, read receipts, high-res media, end-to-end encryption) is not
+available to third-party apps; Google does not expose an RCS API. Texts from
+RCS users still arrive as SMS/MMS. Google's ML spam detection and
+messages.google.com web sync are likewise Google-only.
 
 ## Building
 
@@ -67,9 +79,9 @@ gradle :app:assembleDebug
 
 ## Known gaps / next steps
 
-- MMS is accepted unfiltered in default-app mode (`MmsDeliverReceiver` stub).
-- Default-app mode has no conversation UI — it quarantines and notifies, and
-  you read threads in any SMS app. A minimal thread view is the next step.
+- MMS is accepted unfiltered in default-app mode (`MmsDeliverReceiver` stub),
+  and the conversation UI shows SMS only — incoming MMS (group texts,
+  pictures) are not yet rendered.
 - Companion mode matches on the notification's title, which is the contact
   name (not the number) for senders in your contacts — those are treated as
   trusted anyway.
