@@ -75,29 +75,48 @@ class MessagingRepository(private val context: Context) {
     }
 
     /** The most recent incoming messages, for retroactive rule sweeps. */
-    fun recentInboxMessages(limit: Int = 500): List<InboxMessage> = try {
-        val result = mutableListOf<InboxMessage>()
-        context.contentResolver.query(
-            Telephony.Sms.CONTENT_URI,
-            arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE),
-            "${Telephony.Sms.TYPE} = ${Telephony.Sms.MESSAGE_TYPE_INBOX}",
-            null,
-            "${Telephony.Sms.DATE} DESC",
-        )?.use { cursor ->
-            while (cursor.moveToNext() && result.size < limit) {
-                val address = cursor.getString(0)
-                if (address.isNullOrBlank()) continue
-                result += InboxMessage(
-                    address = address,
-                    body = cursor.getString(1) ?: "",
-                    dateMs = cursor.getLong(2),
-                )
+    fun recentInboxMessages(limit: Int = 500): List<InboxMessage> = inboxMessages(0, limit)
+
+    /**
+     * Incoming messages newest-first, skipping [offset] and returning up to
+     * [limit] — used for paged clean-up ("scan the next 500, then the next").
+     */
+    fun inboxMessages(offset: Int, limit: Int): List<InboxMessage> {
+        // manualSkip > 0 only in the fallback path, where the SQL doesn't page.
+        fun collect(sortOrder: String, manualSkip: Int): List<InboxMessage> {
+            val result = mutableListOf<InboxMessage>()
+            context.contentResolver.query(
+                Telephony.Sms.CONTENT_URI,
+                arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE),
+                "${Telephony.Sms.TYPE} = ${Telephony.Sms.MESSAGE_TYPE_INBOX}",
+                null,
+                sortOrder,
+            )?.use { cursor ->
+                var index = 0
+                while (cursor.moveToNext() && result.size < limit) {
+                    if (index++ < manualSkip) continue
+                    val address = cursor.getString(0)
+                    if (address.isNullOrBlank()) continue
+                    result += InboxMessage(
+                        address = address,
+                        body = cursor.getString(1) ?: "",
+                        dateMs = cursor.getLong(2),
+                    )
+                }
+            }
+            return result
+        }
+        return try {
+            collect("${Telephony.Sms.DATE} DESC LIMIT $limit OFFSET $offset", manualSkip = 0)
+        } catch (e: Exception) {
+            // Provider rejected LIMIT/OFFSET syntax; page manually instead.
+            try {
+                collect("${Telephony.Sms.DATE} DESC", manualSkip = offset)
+            } catch (e2: Exception) {
+                android.util.Log.e(TAG, "failed to load inbox messages", e2)
+                emptyList()
             }
         }
-        result
-    } catch (e: Exception) {
-        android.util.Log.e(TAG, "failed to load recent inbox messages", e)
-        emptyList()
     }
 
     /** Marks the newest incoming message of a thread unread. */

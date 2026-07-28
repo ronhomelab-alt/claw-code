@@ -35,13 +35,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.clawcode.smsfilter.core.NumberPattern
 import com.clawcode.smsfilter.core.PhoneNumbers
 import com.clawcode.smsfilter.core.RuleSet
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -87,6 +92,9 @@ fun FiltersScreen(
                 1 -> BlockedTab(blockedLog, ruleStore, repository, settings, onOpenThread)
                 2 -> SetupTab(
                     settings,
+                    ruleStore,
+                    blockedLog,
+                    repository,
                     isDefaultSmsApp,
                     onRequestDefaultSmsRole,
                     onOpenNotificationAccess,
@@ -176,9 +184,11 @@ private fun RuleSet.addSmart(value: String): RuleSet {
 private fun RuleRow(label: String, onDelete: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, Modifier.padding(top = 12.dp))
+        // weight(1f) lets a long rule wrap within the available width instead
+        // of shoving "Remove" off-screen into a vertical sliver.
+        Text(label, Modifier.weight(1f).padding(end = 8.dp))
         TextButton(onClick = onDelete) { Text("Remove") }
     }
 }
@@ -283,9 +293,98 @@ private fun BlockedTab(
     }
 }
 
+/**
+ * Paged retroactive clean-up: scan a chosen number of messages, report what
+ * moved, then offer to continue into the next batch — a guided way to work
+ * back through an old, junk-filled inbox.
+ */
+@Composable
+private fun CleanupCard(
+    ruleStore: RuleStore,
+    blockedLog: BlockedLog,
+    repository: MessagingRepository,
+) {
+    val scope = rememberCoroutineScope()
+    var batchText by remember { mutableStateOf("500") }
+    var scanned by remember { mutableLongStateOf(0L) }
+    var totalMoved by remember { mutableLongStateOf(0L) }
+    var running by remember { mutableStateOf(false) }
+    var reachedEnd by remember { mutableStateOf(false) }
+    var started by remember { mutableStateOf(false) }
+
+    fun runBatch(size: Int) {
+        if (running || size <= 0) return
+        running = true
+        started = true
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                SpamCleanup.run(repository, ruleStore, blockedLog, offset = scanned.toInt(), limit = size)
+            }
+            scanned += result.scanned
+            totalMoved += result.moved
+            reachedEnd = result.reachedEnd
+            running = false
+        }
+    }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Clean up old messages", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Apply your block rules to messages already in your inbox, working " +
+                    "from newest to oldest. Matches move to Blocked (reversible with " +
+                    "Not spam). Contacts are never touched.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = batchText,
+                    onValueChange = { v -> batchText = v.filter { it.isDigit() }.take(6) },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("How many to scan") },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                    ),
+                )
+                Button(
+                    onClick = { runBatch(batchText.toIntOrNull() ?: 500) },
+                    enabled = !running && !reachedEnd && batchText.isNotBlank(),
+                    modifier = Modifier.padding(start = 8.dp),
+                ) { Text(if (running) "Scanning…" else if (started) "Scan more" else "Scan") }
+            }
+            if (started) {
+                Text(
+                    "Scanned $scanned message(s) so far — moved $totalMoved to Blocked.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (reachedEnd) {
+                    Text(
+                        "Reached the end of your inbox.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else if (!running) {
+                    Text("Keep going?", style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { runBatch(500) }) { Text("Next 500") }
+                        TextButton(onClick = { runBatch(1000) }) { Text("Next 1000") }
+                    }
+                }
+                TextButton(onClick = {
+                    scanned = 0L; totalMoved = 0L; reachedEnd = false; started = false
+                }) { Text("Start over from newest") }
+            }
+        }
+    }
+}
+
 @Composable
 private fun SetupTab(
     settings: AppSettings,
+    ruleStore: RuleStore,
+    blockedLog: BlockedLog,
+    repository: MessagingRepository,
     isDefaultSmsApp: () -> Boolean,
     onRequestDefaultSmsRole: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
@@ -301,6 +400,7 @@ private fun SetupTab(
         Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        CleanupCard(ruleStore, blockedLog, repository)
         crashText?.let { trace ->
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
