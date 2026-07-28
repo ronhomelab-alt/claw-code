@@ -9,6 +9,9 @@ import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,14 +31,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -77,6 +86,14 @@ internal fun spamSenders(
     blockedLog: BlockedLog,
 ): Set<String> = blockedNumbers + blockedLog.senders()
 
+/** Folder view for the conversation list. */
+internal sealed interface Folder {
+    data object All : Folder
+    data object Starred : Folder
+    data object Important : Folder
+    data class Labeled(val name: String) : Folder
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationsScreen(
@@ -84,31 +101,46 @@ fun ConversationsScreen(
     ruleStore: RuleStore,
     blockedLog: BlockedLog,
     settings: AppSettings,
+    metaStore: ConversationMetaStore,
     onOpenThread: (Conversation) -> Unit,
     onNewMessage: () -> Unit,
     onOpenFilters: () -> Unit,
+    onOpenSearch: () -> Unit,
 ) {
     val tick by repository.changeTick.collectAsState()
     val rules by ruleStore.rules.collectAsState()
     val logEntries by blockedLog.entries.collectAsState()
-    // null = still loading (distinct from "no conversations")
+    val metaMap by metaStore.meta.collectAsState()
+    val labelNames by metaStore.labels.collectAsState()
     var allConversations by remember { mutableStateOf<List<Conversation>?>(null) }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-    var actionTarget by remember { mutableStateOf<Conversation?>(null) }
-    var deleteTarget by remember { mutableStateOf<Conversation?>(null) }
     var purgedThisSession by remember { mutableStateOf(false) }
+    var cleaning by remember { mutableStateOf(false) }
+    var folder by remember { mutableStateOf<Folder>(Folder.All) }
+    var selected by remember { mutableStateOf(setOf<Long>()) }
+    var labelDialogFor by remember { mutableStateOf<List<Conversation>?>(null) }
+    var deleteTargets by remember { mutableStateOf<List<Conversation>?>(null) }
 
     val spam = remember(rules.blockedNumbers, logEntries) {
         spamSenders(rules.blockedNumbers, blockedLog)
     }
-    val conversations = allConversations?.filterNot {
-        PhoneNumbers.normalize(it.address) in spam
-    }
+    val visible = allConversations
+        ?.filterNot { PhoneNumbers.normalize(it.address) in spam }
+        ?.filter { c ->
+            val m = metaMap[metaStore.keyFor(c.address)] ?: ThreadMeta()
+            when (val f = folder) {
+                Folder.All -> true
+                Folder.Starred -> m.starred
+                Folder.Important -> m.important
+                is Folder.Labeled -> f.name in m.labels
+            }
+        }
+    val selectionMode = selected.isNotEmpty()
+    val selectedConversations = visible.orEmpty().filter { it.threadId in selected }
 
     LaunchedEffect(tick) {
         allConversations = withContext(Dispatchers.IO) { repository.conversations() }
-        // Run auto-delete once per app session, after the first load.
         val days = settings.autoDeleteBlockedDays
         if (!purgedThisSession && days > 0) {
             purgedThisSession = true
@@ -123,50 +155,42 @@ fun ConversationsScreen(
         }
     }
 
-    fun blockConversation(conversation: Conversation) {
-        val digits = PhoneNumbers.normalize(conversation.address)
-        if (digits.isEmpty()) return
-        ruleStore.update { it.copy(blockedNumbers = it.blockedNumbers + digits) }
-        blockedLog.append(
-            BlockedMessage(
-                timestampMs = System.currentTimeMillis(),
-                sender = conversation.address,
-                body = conversation.snippet,
-                reason = "number blocked by swipe",
+    fun blockConversations(targets: List<Conversation>) {
+        val digitsList = targets.mapNotNull {
+            PhoneNumbers.normalize(it.address).ifEmpty { null }
+        }
+        if (digitsList.isEmpty()) return
+        ruleStore.update { it.copy(blockedNumbers = it.blockedNumbers + digitsList) }
+        targets.forEach {
+            blockedLog.append(
+                BlockedMessage(System.currentTimeMillis(), it.address, it.snippet, "blocked from list")
             )
-        )
+        }
         scope.launch {
             val result = snackbarHostState.showSnackbar(
-                message = "Blocked ${conversation.displayName}",
+                message = if (targets.size == 1) "Blocked ${targets[0].displayName}"
+                else "Blocked ${targets.size} conversations",
                 actionLabel = "Undo",
                 withDismissAction = true,
             )
             if (result == SnackbarResult.ActionPerformed) {
-                ruleStore.update { it.copy(blockedNumbers = it.blockedNumbers - digits) }
-                blockedLog.removeSender(digits)
+                ruleStore.update { it.copy(blockedNumbers = it.blockedNumbers - digitsList.toSet()) }
+                digitsList.forEach { blockedLog.removeSender(it) }
             }
         }
     }
 
-    fun toggleRead(conversation: Conversation) {
+    fun setReadState(targets: List<Conversation>, read: Boolean) {
         scope.launch {
             withContext(Dispatchers.IO) {
-                if (conversation.unreadCount > 0) {
-                    repository.markThreadRead(conversation.threadId)
-                } else {
-                    repository.markThreadUnread(conversation.threadId)
+                targets.forEach {
+                    if (read) repository.markThreadRead(it.threadId)
+                    else repository.markThreadUnread(it.threadId)
                 }
             }
         }
     }
 
-    var cleaning by remember { mutableStateOf(false) }
-
-    /**
-     * Retroactive sweep: applies the current rules to the most recent 500
-     * incoming messages and moves matching senders' conversations to
-     * Blocked. Reversible per sender via "Not spam" in the Blocked tab.
-     */
     fun cleanupRecentMessages() {
         if (cleaning) return
         cleaning = true
@@ -181,10 +205,8 @@ fun ConversationsScreen(
                     val verdict = engine.evaluate(message.address, message.body)
                     if (verdict is com.clawcode.smsfilter.core.Verdict.Block) {
                         matched[digits] = BlockedMessage(
-                            timestampMs = System.currentTimeMillis(),
-                            sender = message.address,
-                            body = message.body,
-                            reason = "clean-up: ${verdict.reason}",
+                            System.currentTimeMillis(), message.address, message.body,
+                            "clean-up: ${verdict.reason}",
                         )
                     }
                 }
@@ -193,125 +215,297 @@ fun ConversationsScreen(
             }
             cleaning = false
             snackbarHostState.showSnackbar(
-                if (movedCount > 0) {
-                    "Moved $movedCount conversation(s) to Blocked"
-                } else {
-                    "No rule matches in the last 500 messages"
-                }
+                if (movedCount > 0) "Moved $movedCount conversation(s) to Blocked"
+                else "No rule matches in the last 500 messages"
             )
         }
     }
 
-    // Long-press action sheet: Block / Delete / Cancel.
-    actionTarget?.let { target ->
-        AlertDialog(
-            onDismissRequest = { actionTarget = null },
-            title = { Text(target.displayName) },
-            text = {
-                Column {
-                    TextButton(onClick = {
-                        actionTarget = null
-                        blockConversation(target)
-                    }) { Text("Block sender") }
-                    TextButton(onClick = {
-                        actionTarget = null
-                        deleteTarget = target
-                    }) { Text("Delete conversation") }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { actionTarget = null }) { Text("Cancel") }
-            },
+    labelDialogFor?.let { targets ->
+        LabelDialog(
+            metaStore = metaStore,
+            targets = targets,
+            onDismiss = { labelDialogFor = null; selected = emptySet() },
         )
     }
 
-    deleteTarget?.let { target ->
+    deleteTargets?.let { targets ->
         AlertDialog(
-            onDismissRequest = { deleteTarget = null },
-            title = { Text("Delete conversation with ${target.displayName}?") },
-            text = { Text("This permanently removes it from your phone.") },
+            onDismissRequest = { deleteTargets = null },
+            title = { Text("Delete ${targets.size} conversation(s)?") },
+            text = { Text("This permanently removes them from your phone.") },
             confirmButton = {
                 Button(onClick = {
-                    deleteTarget = null
+                    deleteTargets = null
+                    selected = emptySet()
                     scope.launch {
-                        val deleted =
-                            withContext(Dispatchers.IO) { repository.deleteThread(target.threadId) }
-                        if (!deleted) {
-                            snackbarHostState.showSnackbar(
-                                "Couldn't delete — this app must be the default SMS app"
-                            )
+                        val ok = withContext(Dispatchers.IO) {
+                            targets.all { repository.deleteThread(it.threadId) }
                         }
+                        if (!ok) snackbarHostState.showSnackbar(
+                            "Couldn't delete — this app must be the default SMS app"
+                        )
                     }
                 }) { Text("Delete") }
             },
-            dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("Cancel") }
-            },
+            dismissButton = { TextButton(onClick = { deleteTargets = null }) { Text("Cancel") } },
         )
     }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Messages") },
-                actions = {
-                    TextButton(onClick = { cleanupRecentMessages() }, enabled = !cleaning) {
-                        Text(if (cleaning) "Cleaning…" else "Clean up")
-                    }
-                    IconButton(onClick = onOpenFilters) {
-                        Icon(Icons.Default.Settings, contentDescription = "Spam filter settings")
-                    }
-                },
-            )
+            if (selectionMode) {
+                SelectionTopBar(
+                    count = selected.size,
+                    onClose = { selected = emptySet() },
+                    onStar = {
+                        selectedConversations.forEach { metaStore.setStarred(it.address, true) }
+                        selected = emptySet()
+                    },
+                    onMarkRead = { setReadState(selectedConversations, true); selected = emptySet() },
+                    onMarkUnread = { setReadState(selectedConversations, false); selected = emptySet() },
+                    onMarkImportant = {
+                        selectedConversations.forEach { metaStore.setImportant(it.address, true) }
+                        selected = emptySet()
+                    },
+                    onLabel = { labelDialogFor = selectedConversations },
+                    onBlock = { blockConversations(selectedConversations); selected = emptySet() },
+                    onDelete = { deleteTargets = selectedConversations },
+                )
+            } else {
+                TopAppBar(
+                    title = { Text("Messages") },
+                    actions = {
+                        IconButton(onClick = onOpenSearch) {
+                            Icon(Icons.Default.Search, contentDescription = "Search")
+                        }
+                        TextButton(onClick = { cleanupRecentMessages() }, enabled = !cleaning) {
+                            Text(if (cleaning) "Cleaning…" else "Clean up")
+                        }
+                        IconButton(onClick = onOpenFilters) {
+                            Icon(Icons.Default.Settings, contentDescription = "Spam filter settings")
+                        }
+                    },
+                )
+            }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            FloatingActionButton(onClick = onNewMessage) {
-                Icon(Icons.Default.Add, contentDescription = "Start chat")
+            if (!selectionMode) {
+                FloatingActionButton(onClick = onNewMessage) {
+                    Icon(Icons.Default.Add, contentDescription = "Start chat")
+                }
             }
         },
     ) { padding ->
-        val list = conversations
-        when {
-            list == null -> Box(
-                Modifier.padding(padding).fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) { CircularProgressIndicator() }
+        Column(Modifier.padding(padding).fillMaxSize()) {
+            FolderChips(folder, labelNames) { folder = it }
+            val list = visible
+            when {
+                list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
 
-            list.isEmpty() -> Box(
-                Modifier.padding(padding).fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) { Text("No conversations yet") }
+                list.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No conversations here")
+                }
 
-            else -> LazyColumn(Modifier.padding(padding).fillMaxSize()) {
-                items(list, key = { it.threadId }) { conversation ->
-                    val dismissState = rememberSwipeToDismissBoxState(
-                        confirmValueChange = { value ->
-                            when (value) {
-                                SwipeToDismissBoxValue.StartToEnd -> blockConversation(conversation)
-                                SwipeToDismissBoxValue.EndToStart -> toggleRead(conversation)
-                                else -> Unit
+                else -> LazyColumn(Modifier.fillMaxSize()) {
+                    items(list, key = { it.threadId }) { conversation ->
+                        val meta = metaMap[metaStore.keyFor(conversation.address)] ?: ThreadMeta()
+                        val isSelected = conversation.threadId in selected
+                        val rowContent: @Composable () -> Unit = {
+                            Surface(
+                                color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer
+                                else MaterialTheme.colorScheme.surface
+                            ) {
+                                ConversationRow(
+                                    conversation = conversation,
+                                    isBlocked = false,
+                                    meta = meta,
+                                    selected = isSelected,
+                                    selectionMode = selectionMode,
+                                    onStarToggle = { metaStore.toggleStar(conversation.address) },
+                                    onClick = {
+                                        if (selectionMode) {
+                                            selected = if (isSelected) selected - conversation.threadId
+                                            else selected + conversation.threadId
+                                        } else onOpenThread(conversation)
+                                    },
+                                    onLongClick = { selected = selected + conversation.threadId },
+                                )
                             }
-                            false // never remove the row; swipe acts, then snaps back
-                        },
-                    )
-                    SwipeToDismissBox(
-                        state = dismissState,
-                        backgroundContent = { SwipeActionBackground(dismissState.dismissDirection) },
-                    ) {
-                        Surface(color = MaterialTheme.colorScheme.surface) {
-                            ConversationRow(
-                                conversation = conversation,
-                                onClick = { onOpenThread(conversation) },
-                                onLongClick = { actionTarget = conversation },
+                        }
+                        if (selectionMode) {
+                            rowContent()
+                        } else {
+                            val dismissState = rememberSwipeToDismissBoxState(
+                                confirmValueChange = { value ->
+                                    when (value) {
+                                        SwipeToDismissBoxValue.StartToEnd ->
+                                            blockConversations(listOf(conversation))
+                                        SwipeToDismissBoxValue.EndToStart ->
+                                            setReadState(
+                                                listOf(conversation),
+                                                conversation.unreadCount > 0,
+                                            )
+                                        else -> Unit
+                                    }
+                                    false
+                                },
                             )
+                            SwipeToDismissBox(
+                                state = dismissState,
+                                backgroundContent = {
+                                    SwipeActionBackground(dismissState.dismissDirection)
+                                },
+                            ) { rowContent() }
                         }
                     }
                 }
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SelectionTopBar(
+    count: Int,
+    onClose: () -> Unit,
+    onStar: () -> Unit,
+    onMarkRead: () -> Unit,
+    onMarkUnread: () -> Unit,
+    onMarkImportant: () -> Unit,
+    onLabel: () -> Unit,
+    onBlock: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var overflow by remember { mutableStateOf(false) }
+    TopAppBar(
+        navigationIcon = {
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, contentDescription = "Cancel selection")
+            }
+        },
+        title = { Text("$count selected") },
+        actions = {
+            IconButton(onClick = onStar) {
+                Icon(Icons.Default.Star, contentDescription = "Star")
+            }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Default.Delete, contentDescription = "Delete")
+            }
+            IconButton(onClick = { overflow = true }) {
+                Icon(Icons.Default.MoreVert, contentDescription = "More actions")
+            }
+            DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+                DropdownMenuItem(text = { Text("Mark read") },
+                    onClick = { overflow = false; onMarkRead() })
+                DropdownMenuItem(text = { Text("Mark unread") },
+                    onClick = { overflow = false; onMarkUnread() })
+                DropdownMenuItem(text = { Text("Mark important") },
+                    onClick = { overflow = false; onMarkImportant() })
+                DropdownMenuItem(text = { Text("Label as…") },
+                    onClick = { overflow = false; onLabel() })
+                DropdownMenuItem(text = { Text("Block") },
+                    onClick = { overflow = false; onBlock() })
+            }
+        },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FolderChips(active: Folder, labels: List<String>, onSelect: (Folder) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        FilterChip(active == Folder.All, { onSelect(Folder.All) }, { Text("All") })
+        FilterChip(active == Folder.Starred, { onSelect(Folder.Starred) }, { Text("Starred") })
+        FilterChip(
+            active == Folder.Important,
+            { onSelect(Folder.Important) },
+            { Text("Important") },
+        )
+        labels.forEach { name ->
+            FilterChip(
+                active == Folder.Labeled(name),
+                { onSelect(Folder.Labeled(name)) },
+                { Text(name) },
+            )
+        }
+    }
+}
+
+/** Dialog to add/remove labels for one or more conversations, and create new labels. */
+@Composable
+private fun LabelDialog(
+    metaStore: ConversationMetaStore,
+    targets: List<Conversation>,
+    onDismiss: () -> Unit,
+) {
+    val labels by metaStore.labels.collectAsState()
+    val metaMap by metaStore.meta.collectAsState()
+    var newLabel by remember { mutableStateOf("") }
+    // A label is "on" if every target has it (observes metaMap so checkboxes update live).
+    fun appliedToAll(label: String) = targets.isNotEmpty() && targets.all {
+        label in (metaMap[metaStore.keyFor(it.address)] ?: ThreadMeta()).labels
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Label as") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                labels.forEach { label ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                if (appliedToAll(label)) {
+                                    targets.forEach { metaStore.removeLabel(it.address, label) }
+                                } else {
+                                    targets.forEach { metaStore.addLabel(it.address, label) }
+                                }
+                            }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.Checkbox(
+                            checked = appliedToAll(label),
+                            onCheckedChange = null,
+                        )
+                        Text(label, Modifier.padding(start = 8.dp))
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newLabel,
+                        onValueChange = { newLabel = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("New label") },
+                        singleLine = true,
+                    )
+                    TextButton(
+                        onClick = {
+                            val name = newLabel.trim()
+                            if (name.isNotEmpty()) {
+                                targets.forEach { metaStore.addLabel(it.address, name) }
+                                newLabel = ""
+                            }
+                        },
+                        enabled = newLabel.isNotBlank(),
+                    ) { Text("Add") }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
 }
 
 @Composable
@@ -336,6 +530,10 @@ private fun SwipeActionBackground(direction: SwipeToDismissBoxValue) {
 internal fun ConversationRow(
     conversation: Conversation,
     isBlocked: Boolean = false,
+    meta: ThreadMeta = ThreadMeta(),
+    selected: Boolean = false,
+    selectionMode: Boolean = false,
+    onStarToggle: (() -> Unit)? = null,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
 ) {
@@ -347,9 +545,20 @@ internal fun ConversationRow(
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selectionMode) {
+            androidx.compose.material3.Checkbox(checked = selected, onCheckedChange = null)
+            androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
+        }
         Avatar(conversation.displayName)
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (meta.important) {
+                    Text(
+                        "» ",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
                 Text(
                     conversation.displayName,
                     style = MaterialTheme.typography.titleMedium,
@@ -374,13 +583,31 @@ internal fun ConversationRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (meta.labels.isNotEmpty()) {
+                Text(
+                    meta.labels.joinToString("  ") { "🏷 $it" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         Column(horizontalAlignment = Alignment.End) {
             Text(
                 DateUtils.getRelativeTimeSpanString(conversation.dateMs).toString(),
                 style = MaterialTheme.typography.labelSmall,
             )
-            if (unread) {
+            if (!selectionMode && onStarToggle != null) {
+                IconButton(onClick = onStarToggle, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        if (meta.starred) Icons.Default.Star else Icons.Default.StarBorder,
+                        contentDescription = if (meta.starred) "Unstar" else "Star",
+                        tint = if (meta.starred) MaterialTheme.colorScheme.tertiary
+                        else MaterialTheme.colorScheme.outline,
+                    )
+                }
+            } else if (unread) {
                 Box(
                     Modifier
                         .padding(top = 4.dp)
@@ -426,11 +653,15 @@ fun ThreadScreen(
     repository: MessagingRepository,
     ruleStore: RuleStore,
     blockedLog: BlockedLog,
+    metaStore: ConversationMetaStore,
     threadId: Long,
     address: String,
     onBack: () -> Unit,
 ) {
     val tick by repository.changeTick.collectAsState()
+    val metaMap by metaStore.meta.collectAsState()
+    val meta = metaMap[metaStore.keyFor(address)] ?: ThreadMeta()
+    var showLabelDialog by remember { mutableStateOf(false) }
     var messages by remember { mutableStateOf(emptyList<ThreadMessage>()) }
     var draft by remember { mutableStateOf("") }
     var sendError by remember { mutableStateOf<String?>(null) }
@@ -547,6 +778,14 @@ fun ThreadScreen(
         )
     }
 
+    if (showLabelDialog) {
+        LabelDialog(
+            metaStore = metaStore,
+            targets = listOf(Conversation(threadId, address, address, "", 0L, 0)),
+            onDismiss = { showLabelDialog = false },
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -557,10 +796,26 @@ fun ThreadScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { metaStore.toggleStar(address) }) {
+                        Icon(
+                            if (meta.starred) Icons.Default.Star else Icons.Default.StarBorder,
+                            contentDescription = if (meta.starred) "Unstar" else "Star",
+                            tint = if (meta.starred) MaterialTheme.colorScheme.tertiary
+                            else androidx.compose.material3.LocalContentColor.current,
+                        )
+                    }
                     IconButton(onClick = { menuOpen = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "Conversation options")
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(if (meta.important) "Unmark important" else "Mark important") },
+                            onClick = { menuOpen = false; metaStore.toggleImportant(address) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Label as…") },
+                            onClick = { menuOpen = false; showLabelDialog = true },
+                        )
                         DropdownMenuItem(
                             text = { Text("Block number") },
                             onClick = {
@@ -750,104 +1005,197 @@ fun NewMessageScreen(
             )
         },
     ) { padding ->
-        Column(
-            Modifier.padding(padding).padding(16.dp).fillMaxSize().imePadding(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            if (recipients.isNotEmpty()) {
-                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-                androidx.compose.foundation.layout.FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    recipients.forEach { chip ->
-                        androidx.compose.material3.InputChip(
-                            selected = false,
-                            onClick = { recipients = recipients - chip },
-                            label = { Text(chip.name) },
-                        )
+        fun doSend() {
+            val text = body.trim()
+            if (text.isEmpty()) return
+            if (!commitTypedToken()) return
+            if (recipients.isEmpty()) {
+                sendError = "Add at least one recipient"
+                return
+            }
+            if (!hasSendPermission(context)) {
+                sendError = SEND_PERMISSION_HELP
+                sendPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+                return
+            }
+            // Sends one individual SMS per recipient (SMS has no true group
+            // thread without MMS/RCS, which third-party apps can't originate).
+            var lastThreadId = -1L
+            var lastAddress = ""
+            var failure: String? = null
+            for (chip in recipients) {
+                when (val result = repository.send(chip.number, text)) {
+                    is SendResult.Sent -> {
+                        lastThreadId = result.threadId
+                        lastAddress = chip.number
                     }
+                    is SendResult.Failed -> failure = "${chip.name}: ${result.reason}"
                 }
             }
-            OutlinedTextField(
-                value = recipient,
-                onValueChange = { value ->
-                    sendError = null
-                    recipient = value
-                    if (value.endsWith(",")) commitTypedToken()
-                },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("To — separate several people with commas") },
-                isError = sendError != null,
-                supportingText = sendError?.let { err ->
-                    { Text(err, color = MaterialTheme.colorScheme.error) }
-                },
-            )
-            suggestions.forEach { match ->
-                Surface(
-                    onClick = { addRecipient(match) },
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+            when {
+                failure != null -> sendError = failure
+                recipients.size == 1 && lastThreadId >= 0 -> onSent(lastThreadId, lastAddress)
+                else -> onBack()
+            }
+        }
+
+        Column(Modifier.padding(padding).fillMaxSize().imePadding()) {
+            // Scrollable recipient-editing area takes the free space...
+            Column(
+                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (recipients.isNotEmpty()) {
+                    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Avatar(match.name)
-                        Column(Modifier.padding(start = 12.dp)) {
-                            Text(match.name, style = MaterialTheme.typography.titleSmall)
-                            Text(match.number, style = MaterialTheme.typography.bodySmall)
+                        recipients.forEach { chip ->
+                            androidx.compose.material3.InputChip(
+                                selected = false,
+                                onClick = { recipients = recipients - chip },
+                                label = { Text(chip.name) },
+                            )
                         }
                     }
                 }
-            }
-            OutlinedTextField(
-                value = body,
-                onValueChange = { body = it },
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                label = { Text("Text message") },
-            )
-            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                IconButton(
-                    onClick = {
-                        val text = body.trim()
-                        if (text.isEmpty()) return@IconButton
-                        if (!commitTypedToken()) return@IconButton
-                        if (recipients.isEmpty()) {
-                            sendError = "Add at least one recipient"
-                            return@IconButton
-                        }
-                        if (!hasSendPermission(context)) {
-                            sendError = SEND_PERMISSION_HELP
-                            sendPermissionLauncher.launch(Manifest.permission.SEND_SMS)
-                            return@IconButton
-                        }
-                        // Group send = one SMS per person (like Google
-                        // Messages' mass text without MMS/RCS).
-                        var lastThreadId = -1L
-                        var lastAddress = ""
-                        var failure: String? = null
-                        for (chip in recipients) {
-                            when (val result = repository.send(chip.number, text)) {
-                                is SendResult.Sent -> {
-                                    lastThreadId = result.threadId
-                                    lastAddress = chip.number
-                                }
-                                is SendResult.Failed ->
-                                    failure = "${chip.name}: ${result.reason}"
+                OutlinedTextField(
+                    value = recipient,
+                    onValueChange = { value ->
+                        sendError = null
+                        recipient = value
+                        if (value.endsWith(",")) commitTypedToken()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("To — add several with commas") },
+                    isError = sendError != null,
+                    supportingText = sendError?.let { err ->
+                        { Text(err, color = MaterialTheme.colorScheme.error) }
+                    },
+                )
+                suggestions.forEach { match ->
+                    Surface(
+                        onClick = { addRecipient(match) },
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Avatar(match.name)
+                            Column(Modifier.padding(start = 12.dp)) {
+                                Text(match.name, style = MaterialTheme.typography.titleSmall)
+                                Text(match.number, style = MaterialTheme.typography.bodySmall)
                             }
                         }
-                        when {
-                            failure != null -> sendError = failure
-                            recipients.size == 1 && lastThreadId >= 0 ->
-                                onSent(lastThreadId, lastAddress)
-                            else -> onBack()
-                        }
-                    },
+                    }
+                }
+                if (recipients.size > 1) {
+                    Text(
+                        "Each person gets this as a separate text — replies come back in " +
+                            "their own conversation, not a shared group thread.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            // ...and the message box + send button stay pinned above the keyboard.
+            Row(
+                Modifier.fillMaxWidth().padding(8.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                OutlinedTextField(
+                    value = body,
+                    onValueChange = { body = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Text message") },
+                    minLines = 2,
+                    maxLines = 6,
+                )
+                IconButton(
+                    onClick = { doSend() },
                     enabled = body.isNotBlank() &&
                         (recipients.isNotEmpty() || recipient.isNotBlank()),
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Full-text + tag search across conversations. Matches the query against
+ * contact name, number, message snippet, and any labels; a query equal to a
+ * label name shows that whole folder.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SearchScreen(
+    repository: MessagingRepository,
+    metaStore: ConversationMetaStore,
+    onOpenThread: (Conversation) -> Unit,
+    onBack: () -> Unit,
+) {
+    val tick by repository.changeTick.collectAsState()
+    val metaMap by metaStore.meta.collectAsState()
+    var query by remember { mutableStateOf("") }
+    var all by remember { mutableStateOf<List<Conversation>?>(null) }
+
+    LaunchedEffect(tick) { all = withContext(Dispatchers.IO) { repository.conversations() } }
+
+    val q = query.trim().lowercase()
+    val results = if (q.isEmpty()) emptyList() else all.orEmpty().filter { c ->
+        val m = metaMap[metaStore.keyFor(c.address)] ?: ThreadMeta()
+        c.displayName.lowercase().contains(q) ||
+            c.address.lowercase().contains(q) ||
+            c.snippet.lowercase().contains(q) ||
+            m.labels.any { it.lowercase().contains(q) }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Search name, number, text, or tag") },
+                        singleLine = true,
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Column(Modifier.padding(padding).fillMaxSize()) {
+            when {
+                all == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+                q.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Type to search your messages")
+                }
+                results.isEmpty() -> Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) { Text("No matches") }
+                else -> LazyColumn(Modifier.fillMaxSize()) {
+                    items(results, key = { it.threadId }) { conversation ->
+                        ConversationRow(
+                            conversation = conversation,
+                            meta = metaMap[metaStore.keyFor(conversation.address)] ?: ThreadMeta(),
+                            onClick = { onOpenThread(conversation) },
+                        )
+                    }
                 }
             }
         }

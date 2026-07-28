@@ -16,6 +16,9 @@ class App : Application() {
     lateinit var settings: AppSettings
         private set
 
+    lateinit var metaStore: ConversationMetaStore
+        private set
+
     override fun onCreate() {
         super.onCreate()
         installCrashRecorder()
@@ -23,6 +26,7 @@ class App : Application() {
         blockedLog = BlockedLog(this)
         messagingRepository = MessagingRepository(this)
         settings = AppSettings(this)
+        metaStore = ConversationMetaStore(this)
     }
 
     /**

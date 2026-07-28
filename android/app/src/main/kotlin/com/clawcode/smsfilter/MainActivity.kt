@@ -33,6 +33,7 @@ sealed interface Screen {
     data class Thread(val threadId: Long, val address: String) : Screen
     data object NewMessage : Screen
     data object Filters : Screen
+    data object Search : Screen
 }
 
 class MainActivity : ComponentActivity() {
@@ -83,18 +84,29 @@ class MainActivity : ComponentActivity() {
                         ruleStore = app.ruleStore,
                         blockedLog = app.blockedLog,
                         settings = app.settings,
+                        metaStore = app.metaStore,
                         onOpenThread = {
                             screen = Screen.Thread(it.threadId, it.address)
                         },
                         onNewMessage = { screen = Screen.NewMessage },
                         onOpenFilters = { screen = Screen.Filters },
+                        onOpenSearch = { screen = Screen.Search },
                     )
                     is Screen.Thread -> ThreadScreen(
                         repository = app.messagingRepository,
                         ruleStore = app.ruleStore,
                         blockedLog = app.blockedLog,
+                        metaStore = app.metaStore,
                         threadId = current.threadId,
                         address = current.address,
+                        onBack = { screen = Screen.Conversations },
+                    )
+                    is Screen.Search -> SearchScreen(
+                        repository = app.messagingRepository,
+                        metaStore = app.metaStore,
+                        onOpenThread = {
+                            screen = Screen.Thread(it.threadId, it.address)
+                        },
                         onBack = { screen = Screen.Conversations },
                     )
                     is Screen.NewMessage -> NewMessageScreen(
