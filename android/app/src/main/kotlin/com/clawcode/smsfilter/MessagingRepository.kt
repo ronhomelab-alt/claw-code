@@ -31,6 +31,12 @@ data class ContactMatch(
     val number: String,
 )
 
+data class InboxMessage(
+    val address: String,
+    val body: String,
+    val dateMs: Long,
+)
+
 data class ThreadMessage(
     val id: Long,
     val address: String,
@@ -66,6 +72,32 @@ class MessagingRepository(private val context: Context) {
         } catch (e: Exception) {
             android.util.Log.w(TAG, "could not observe SMS provider", e)
         }
+    }
+
+    /** The most recent incoming messages, for retroactive rule sweeps. */
+    fun recentInboxMessages(limit: Int = 500): List<InboxMessage> = try {
+        val result = mutableListOf<InboxMessage>()
+        context.contentResolver.query(
+            Telephony.Sms.CONTENT_URI,
+            arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE),
+            "${Telephony.Sms.TYPE} = ${Telephony.Sms.MESSAGE_TYPE_INBOX}",
+            null,
+            "${Telephony.Sms.DATE} DESC",
+        )?.use { cursor ->
+            while (cursor.moveToNext() && result.size < limit) {
+                val address = cursor.getString(0)
+                if (address.isNullOrBlank()) continue
+                result += InboxMessage(
+                    address = address,
+                    body = cursor.getString(1) ?: "",
+                    dateMs = cursor.getLong(2),
+                )
+            }
+        }
+        result
+    } catch (e: Exception) {
+        android.util.Log.e(TAG, "failed to load recent inbox messages", e)
+        emptyList()
     }
 
     /** Marks the newest incoming message of a thread unread. */

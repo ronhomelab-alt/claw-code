@@ -160,6 +160,48 @@ fun ConversationsScreen(
         }
     }
 
+    var cleaning by remember { mutableStateOf(false) }
+
+    /**
+     * Retroactive sweep: applies the current rules to the most recent 500
+     * incoming messages and moves matching senders' conversations to
+     * Blocked. Reversible per sender via "Not spam" in the Blocked tab.
+     */
+    fun cleanupRecentMessages() {
+        if (cleaning) return
+        cleaning = true
+        scope.launch {
+            val movedCount = withContext(Dispatchers.IO) {
+                val engine = ruleStore.engine()
+                val alreadySpam = spamSenders(ruleStore.rules.value.blockedNumbers, blockedLog)
+                val matched = LinkedHashMap<String, BlockedMessage>()
+                for (message in repository.recentInboxMessages(500)) {
+                    val digits = PhoneNumbers.normalize(message.address)
+                    if (digits.isEmpty() || digits in alreadySpam || digits in matched) continue
+                    val verdict = engine.evaluate(message.address, message.body)
+                    if (verdict is com.clawcode.smsfilter.core.Verdict.Block) {
+                        matched[digits] = BlockedMessage(
+                            timestampMs = System.currentTimeMillis(),
+                            sender = message.address,
+                            body = message.body,
+                            reason = "clean-up: ${verdict.reason}",
+                        )
+                    }
+                }
+                matched.values.forEach { blockedLog.append(it) }
+                matched.size
+            }
+            cleaning = false
+            snackbarHostState.showSnackbar(
+                if (movedCount > 0) {
+                    "Moved $movedCount conversation(s) to Blocked"
+                } else {
+                    "No rule matches in the last 500 messages"
+                }
+            )
+        }
+    }
+
     // Long-press action sheet: Block / Delete / Cancel.
     actionTarget?.let { target ->
         AlertDialog(
@@ -214,6 +256,9 @@ fun ConversationsScreen(
             TopAppBar(
                 title = { Text("Messages") },
                 actions = {
+                    TextButton(onClick = { cleanupRecentMessages() }, enabled = !cleaning) {
+                        Text(if (cleaning) "Cleaning…" else "Clean up")
+                    }
                     IconButton(onClick = onOpenFilters) {
                         Icon(Icons.Default.Settings, contentDescription = "Spam filter settings")
                     }
