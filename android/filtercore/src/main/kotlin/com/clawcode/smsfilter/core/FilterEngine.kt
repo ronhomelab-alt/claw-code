@@ -27,6 +27,12 @@ data class RuleSet(
 
 class FilterEngine(private val rules: RuleSet) {
 
+    // Pair each text rule with its canonical form once, up front.
+    private val canonicalTextRules: List<Pair<String, String>> =
+        rules.textRules
+            .map { it to TextNormalizer.canonical(it) }
+            .filter { it.second.isNotEmpty() }
+
     fun evaluate(sender: String, body: String): Verdict {
         val digits = PhoneNumbers.normalize(sender)
 
@@ -43,8 +49,13 @@ class FilterEngine(private val rules: RuleSet) {
         // Never body-block a message that looks like a verification code:
         // losing an OTP hurts far more than seeing one spam text.
         if (!looksLikeVerificationCode(body)) {
-            rules.textRules.firstOrNull { body.contains(it, ignoreCase = true) }?.let {
-                return Verdict.Block("body contains \"$it\"")
+            // Match in canonical space so "T0p-T1er $olar" still hits a
+            // "Top Tier Solar" rule despite case/spacing/leetspeak tricks.
+            val canonicalBody = TextNormalizer.canonical(body)
+            canonicalTextRules.firstOrNull { (_, canonical) ->
+                canonicalBody.contains(canonical)
+            }?.let { (raw, _) ->
+                return Verdict.Block("body matches \"$raw\"")
             }
         }
 

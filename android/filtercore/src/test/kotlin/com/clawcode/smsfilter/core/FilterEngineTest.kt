@@ -133,6 +133,44 @@ class FilterEngineTest {
     }
 }
 
+class TextNormalizerTest {
+    private val engine = FilterEngine(RuleSet(textRules = listOf("Top Tier Solar")))
+
+    @Test
+    fun `one rule catches case spacing punctuation and leetspeak variants`() {
+        val variants = listOf(
+            "Top Tier Solar has a deal for you",
+            "TOP-TIER SOLAR!! final notice",
+            "T0p T1er S0lar savings expire today",
+            "Reply YES to TopTier\$olar",
+            "top.tier.solar wants to talk",
+            "T0PT13R50LAR",
+        )
+        for (variant in variants) {
+            assertIs<Verdict.Block>(
+                engine.evaluate("(555) 555-0100", variant),
+                "should block: $variant",
+            )
+        }
+    }
+
+    @Test
+    fun `unrelated solar messages are not blocked`() {
+        assertIs<Verdict.Allow>(
+            engine.evaluate("(555) 555-0100", "my solar panels finally got installed!")
+        )
+        assertIs<Verdict.Allow>(
+            engine.evaluate("(555) 555-0100", "top tier performance from the team today")
+        )
+    }
+
+    @Test
+    fun `canonicalization folds confusable characters`() {
+        assertEquals("toptiersoiar", TextNormalizer.canonical("T0p-T1er $0lar"))
+        assertEquals(TextNormalizer.canonical("solar"), TextNormalizer.canonical("S0LAR"))
+    }
+}
+
 class RuleSetCodecTest {
     @Test
     fun `round trips through text format`() {

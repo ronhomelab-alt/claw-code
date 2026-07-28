@@ -30,9 +30,12 @@ Rules are evaluated in this order (first match wins):
    - `(809) 123-5678` — blocks one number
    - Area-code prefixes only apply to full 10-digit numbers, so `(407)` never
      accidentally blocks a 5-digit shortcode starting with 407.
-4. **Text rules** — case-insensitive substring match on the body. Messages
-   that look like verification codes are exempt from text rules (a lost OTP
-   hurts more than one spam text).
+4. **Text rules** — fuzzy substring match on the body. Case, spacing,
+   punctuation, and common leetspeak substitutions (0→o, 1→i, 3→e, 4→a,
+   5/$→s, 7→t, 8→b, @→a) are folded away before matching, so one
+   "Top Tier Solar" rule also catches "TOP-TIER SOLAR!!", "T0p T1er S0lar",
+   and "TopTier$olar". Messages that look like verification codes are exempt
+   from text rules (a lost OTP hurts more than one spam text).
 
 Rules are stored in a human-editable text file (`rules.txt` in app storage)
 with `allow:` / `block:` / `pattern:` / `text:` lines, so lists can be
