@@ -12,8 +12,21 @@ android {
         applicationId = "com.clawcode.smsfilter"
         minSdk = 29 // Android 10: RoleManager for the default-SMS-app role
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.3.2"
+        versionCode = 6
+        versionName = "0.3.3"
+    }
+
+    // Sign every debug build with the same committed keystore so updates
+    // install in place. CI used to generate a fresh key per build, which made
+    // Android reject each new APK as a "different app" (App not installed).
+    // This key signs personal debug builds only - not for release/Play use.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildFeatures {
