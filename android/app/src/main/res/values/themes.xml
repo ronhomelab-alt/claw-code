@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Base window theme (known-good platform style). Compose paints the
+         actual light/dark surfaces per the user's in-app theme choice, so all
+         visible screens follow the selected theme regardless of this. -->
     <style name="Theme.SmsFilter" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

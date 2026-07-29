@@ -137,19 +137,27 @@ fun ConversationsScreen(
         }
     val selectionMode = selected.isNotEmpty()
     val selectedConversations = visible.orEmpty().filter { it.threadId in selected }
+    val swipeRight = settings.swipeRightAction
+    val swipeLeft = settings.swipeLeftAction
 
     LaunchedEffect(tick) {
         allConversations = withContext(Dispatchers.IO) { repository.conversations() }
-        val days = settings.autoDeleteBlockedDays
-        if (!purgedThisSession && days > 0) {
+        if (!purgedThisSession) {
             purgedThisSession = true
-            val cutoff = System.currentTimeMillis() - days * 24L * 60 * 60 * 1000
+            val days = settings.autoDeleteBlockedDays
+            val otp = settings.autoDeleteOtp
             withContext(Dispatchers.IO) {
-                val spamThreads = allConversations.orEmpty()
-                    .filter { PhoneNumbers.normalize(it.address) in spam }
-                    .map { it.threadId }
-                repository.purgeSpamThreadsOlderThan(spamThreads, cutoff)
-                blockedLog.purgeOlderThan(cutoff)
+                if (days > 0) {
+                    val cutoff = System.currentTimeMillis() - days * 24L * 60 * 60 * 1000
+                    val spamThreads = allConversations.orEmpty()
+                        .filter { PhoneNumbers.normalize(it.address) in spam }
+                        .map { it.threadId }
+                    repository.purgeSpamThreadsOlderThan(spamThreads, cutoff)
+                    blockedLog.purgeOlderThan(cutoff)
+                }
+                if (otp) {
+                    repository.deleteOldOtpMessages(System.currentTimeMillis() - 24L * 60 * 60 * 1000)
+                }
             }
         }
     }
@@ -187,6 +195,17 @@ fun ConversationsScreen(
                     else repository.markThreadUnread(it.threadId)
                 }
             }
+        }
+    }
+
+    fun performSwipe(action: SwipeAction, conversation: Conversation) {
+        when (action) {
+            SwipeAction.BLOCK -> blockConversations(listOf(conversation))
+            SwipeAction.READ_UNREAD ->
+                setReadState(listOf(conversation), conversation.unreadCount > 0)
+            SwipeAction.STAR -> metaStore.toggleStar(conversation.address)
+            SwipeAction.DELETE -> deleteTargets = listOf(conversation) // confirm before deleting
+            SwipeAction.NONE -> Unit
         }
     }
 
@@ -351,12 +370,9 @@ fun ConversationsScreen(
                                 confirmValueChange = { value ->
                                     when (value) {
                                         SwipeToDismissBoxValue.StartToEnd ->
-                                            blockConversations(listOf(conversation))
+                                            performSwipe(swipeRight, conversation)
                                         SwipeToDismissBoxValue.EndToStart ->
-                                            setReadState(
-                                                listOf(conversation),
-                                                conversation.unreadCount > 0,
-                                            )
+                                            performSwipe(swipeLeft, conversation)
                                         else -> Unit
                                     }
                                     false
@@ -365,7 +381,11 @@ fun ConversationsScreen(
                             SwipeToDismissBox(
                                 state = dismissState,
                                 backgroundContent = {
-                                    SwipeActionBackground(dismissState.dismissDirection)
+                                    SwipeActionBackground(
+                                        dismissState.dismissDirection,
+                                        AppSettings.SWIPE_LABELS[swipeRight] ?: "",
+                                        AppSettings.SWIPE_LABELS[swipeLeft] ?: "",
+                                    )
                                 },
                             ) { rowContent() }
                         }
@@ -523,12 +543,16 @@ private fun LabelDialog(
 }
 
 @Composable
-private fun SwipeActionBackground(direction: SwipeToDismissBoxValue) {
+private fun SwipeActionBackground(
+    direction: SwipeToDismissBoxValue,
+    rightLabel: String,
+    leftLabel: String,
+) {
     val (color, label, alignment) = when (direction) {
         SwipeToDismissBoxValue.StartToEnd ->
-            Triple(MaterialTheme.colorScheme.errorContainer, "Block", Alignment.CenterStart)
+            Triple(MaterialTheme.colorScheme.errorContainer, rightLabel, Alignment.CenterStart)
         SwipeToDismissBoxValue.EndToStart ->
-            Triple(MaterialTheme.colorScheme.primaryContainer, "Read/Unread", Alignment.CenterEnd)
+            Triple(MaterialTheme.colorScheme.primaryContainer, leftLabel, Alignment.CenterEnd)
         else -> return
     }
     Box(
@@ -915,10 +939,34 @@ fun ThreadScreen(
     }
 }
 
+/** iPhone tapbacks arrive as text like: Loved "the message". Prefix an emoji. */
+private val REACTION_REGEX = Regex(
+    """^(Loved|Liked|Disliked|Laughed at|Emphasized|Questioned)\s+[“"'].*[”"']$""",
+)
+
+internal fun withReactionEmoji(body: String, enabled: Boolean): String {
+    if (!enabled) return body
+    val match = REACTION_REGEX.find(body.trim()) ?: return body
+    val emoji = when (match.groupValues[1]) {
+        "Loved" -> "❤️"
+        "Liked" -> "👍"
+        "Disliked" -> "👎"
+        "Laughed at" -> "😂"
+        "Emphasized" -> "‼️"
+        "Questioned" -> "❓"
+        else -> ""
+    }
+    return "$emoji $body"
+}
+
 @Composable
 private fun MessageBubble(message: ThreadMessage) {
     val outgoing = message.isOutgoing
     val context = androidx.compose.ui.platform.LocalContext.current
+    val displayBody = withReactionEmoji(
+        message.body,
+        App.from(context).settings.showIphoneReactionsAsEmoji,
+    )
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = if (outgoing) Arrangement.End else Arrangement.Start,
@@ -939,7 +987,7 @@ private fun MessageBubble(message: ThreadMessage) {
         ) {
             Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Text(
-                    message.body,
+                    displayBody,
                     color = if (outgoing) {
                         MaterialTheme.colorScheme.onPrimary
                     } else {

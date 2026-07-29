@@ -1,5 +1,6 @@
 package com.clawcode.smsfilter
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -293,6 +294,92 @@ private fun BlockedTab(
     }
 }
 
+/** Theme, message-organization, and behavior settings (Google-Messages-style). */
+@Composable
+private fun AppearanceCard(settings: AppSettings) {
+    val theme by settings.theme.collectAsState()
+    var otp by remember { mutableStateOf(settings.autoDeleteOtp) }
+    var reactions by remember { mutableStateOf(settings.showIphoneReactionsAsEmoji) }
+    var swipeRight by remember { mutableStateOf(settings.swipeRightAction) }
+    var swipeLeft by remember { mutableStateOf(settings.swipeLeftAction) }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Appearance & behavior", style = MaterialTheme.typography.titleSmall)
+
+            Text("Theme", style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    "System" to ThemeMode.SYSTEM,
+                    "Light" to ThemeMode.LIGHT,
+                    "Dark" to ThemeMode.DARK,
+                ).forEach { (label, mode) ->
+                    FilterChip(
+                        selected = theme == mode,
+                        onClick = { settings.setTheme(mode) },
+                        label = { Text(label) },
+                    )
+                }
+            }
+
+            HorizontalDivider()
+            ToggleRow(
+                title = "Auto-delete OTP messages after 24 hours",
+                subtitle = "One-time passcodes are removed on app open — they're useless " +
+                    "after use and needn't linger.",
+                checked = otp,
+                onChange = { settings.autoDeleteOtp = it; otp = it },
+            )
+            ToggleRow(
+                title = "Show iPhone reactions as emoji",
+                subtitle = "Renders \"Loved …\" tapbacks from iPhones with an emoji.",
+                checked = reactions,
+                onChange = { settings.showIphoneReactionsAsEmoji = it; reactions = it },
+            )
+
+            HorizontalDivider()
+            Text("Swipe actions", style = MaterialTheme.typography.bodyMedium)
+            SwipePicker("Swipe right", swipeRight) { settings.swipeRightAction = it; swipeRight = it }
+            SwipePicker("Swipe left", swipeLeft) { settings.swipeLeftAction = it; swipeLeft = it }
+        }
+    }
+}
+
+@Composable
+private fun ToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+@Composable
+private fun SwipePicker(label: String, current: SwipeAction, onPick: (SwipeAction) -> Unit) {
+    Column {
+        Text(label, style = MaterialTheme.typography.bodySmall)
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SwipeAction.entries.forEach { action ->
+                FilterChip(
+                    selected = current == action,
+                    onClick = { onPick(action) },
+                    label = { Text(AppSettings.SWIPE_LABELS[action] ?: action.name) },
+                )
+            }
+        }
+    }
+}
+
 /**
  * Paged retroactive clean-up: scan a chosen number of messages, report what
  * moved, then offer to continue into the next batch — a guided way to work
@@ -400,6 +487,7 @@ private fun SetupTab(
         Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        AppearanceCard(settings)
         CleanupCard(ruleStore, blockedLog, repository)
         crashText?.let { trace ->
             Card(Modifier.fillMaxWidth()) {

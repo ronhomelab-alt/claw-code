@@ -159,6 +159,42 @@ class MessagingRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Deletes inbox messages older than [cutoffMs] that look like one-time
+     * passcodes. Returns how many were removed. Needs the default-SMS-app role.
+     */
+    fun deleteOldOtpMessages(cutoffMs: Long): Int {
+        return try {
+            val ids = mutableListOf<Long>()
+            context.contentResolver.query(
+                Telephony.Sms.CONTENT_URI,
+                arrayOf(Telephony.Sms._ID, Telephony.Sms.BODY),
+                "${Telephony.Sms.TYPE} = ${Telephony.Sms.MESSAGE_TYPE_INBOX} AND ${Telephony.Sms.DATE} < ?",
+                arrayOf(cutoffMs.toString()),
+                null,
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val body = cursor.getString(1) ?: ""
+                    if (com.clawcode.smsfilter.core.FilterEngine.looksLikeVerificationCode(body)) {
+                        ids += cursor.getLong(0)
+                    }
+                }
+            }
+            var deleted = 0
+            for (id in ids) {
+                deleted += context.contentResolver.delete(
+                    Telephony.Sms.CONTENT_URI,
+                    "${Telephony.Sms._ID} = ?",
+                    arrayOf(id.toString()),
+                )
+            }
+            deleted
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "OTP auto-delete failed", e)
+            0
+        }
+    }
+
     /** Deletes an entire conversation. Only works as the default SMS app. */
     fun deleteThread(threadId: Long): Boolean = try {
         context.contentResolver.delete(

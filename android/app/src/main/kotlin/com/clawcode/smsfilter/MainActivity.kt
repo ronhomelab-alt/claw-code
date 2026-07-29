@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,7 +54,8 @@ class MainActivity : ComponentActivity() {
         val crashFile = java.io.File(filesDir, App.CRASH_FILE)
 
         setContent {
-            MaterialTheme {
+            val themeMode by app.settings.theme.collectAsState()
+            SmsFilterTheme(themeMode) {
                 // If the last run crashed, show the report BEFORE touching any
                 // messaging code, so a startup crash can never hide its own
                 // diagnosis behind a crash loop.
@@ -69,7 +71,7 @@ class MainActivity : ComponentActivity() {
                             showCrashReport = false
                         },
                     )
-                    return@MaterialTheme
+                    return@SmsFilterTheme
                 }
 
                 var screen by remember { mutableStateOf<Screen>(initialScreen) }
