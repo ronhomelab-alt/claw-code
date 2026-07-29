@@ -59,6 +59,26 @@ class AppSettings(context: Context) {
         get() = readSwipe(KEY_SWIPE_LEFT, SwipeAction.READ_UNREAD)
         set(value) = prefs.edit().putString(KEY_SWIPE_LEFT, value.name).apply()
 
+    /** Request SMS delivery reports so sent messages can show "Delivered". */
+    var deliveryReports: Boolean
+        get() = prefs.getBoolean(KEY_DELIVERY_REPORTS, false)
+        set(value) = prefs.edit().putBoolean(KEY_DELIVERY_REPORTS, value).apply()
+
+    /** Transliterate outgoing text to plain GSM-7 characters (fewer SMS segments). */
+    var useSimpleCharacters: Boolean
+        get() = prefs.getBoolean(KEY_SIMPLE_CHARS, false)
+        set(value) = prefs.edit().putBoolean(KEY_SIMPLE_CHARS, value).apply()
+
+    /** Enable pinch-to-zoom on conversation text. */
+    var pinchToZoom: Boolean
+        get() = prefs.getBoolean(KEY_PINCH_ZOOM, true)
+        set(value) = prefs.edit().putBoolean(KEY_PINCH_ZOOM, value).apply()
+
+    /** Persisted conversation text scale (from pinch-to-zoom), clamped 0.8–2.0. */
+    var conversationTextScale: Float
+        get() = prefs.getFloat(KEY_TEXT_SCALE, 1f).coerceIn(0.8f, 2.0f)
+        set(value) = prefs.edit().putFloat(KEY_TEXT_SCALE, value.coerceIn(0.8f, 2.0f)).apply()
+
     private fun readSwipe(key: String, default: SwipeAction): SwipeAction =
         runCatching { SwipeAction.valueOf(prefs.getString(key, null) ?: default.name) }
             .getOrDefault(default)
@@ -71,6 +91,10 @@ class AppSettings(context: Context) {
         private const val KEY_IPHONE_REACTIONS = "iphone_reactions_emoji"
         private const val KEY_SWIPE_RIGHT = "swipe_right_action"
         private const val KEY_SWIPE_LEFT = "swipe_left_action"
+        private const val KEY_DELIVERY_REPORTS = "delivery_reports"
+        private const val KEY_SIMPLE_CHARS = "use_simple_characters"
+        private const val KEY_PINCH_ZOOM = "pinch_to_zoom"
+        private const val KEY_TEXT_SCALE = "conversation_text_scale"
 
         /** Label to days; 0 means never. */
         val AUTO_DELETE_CHOICES = listOf(

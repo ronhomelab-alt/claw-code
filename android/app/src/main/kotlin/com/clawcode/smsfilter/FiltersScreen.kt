@@ -302,6 +302,9 @@ private fun AppearanceCard(settings: AppSettings) {
     var reactions by remember { mutableStateOf(settings.showIphoneReactionsAsEmoji) }
     var swipeRight by remember { mutableStateOf(settings.swipeRightAction) }
     var swipeLeft by remember { mutableStateOf(settings.swipeLeftAction) }
+    var delivery by remember { mutableStateOf(settings.deliveryReports) }
+    var simpleChars by remember { mutableStateOf(settings.useSimpleCharacters) }
+    var pinch by remember { mutableStateOf(settings.pinchToZoom) }
 
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -335,6 +338,25 @@ private fun AppearanceCard(settings: AppSettings) {
                 subtitle = "Renders \"Loved …\" tapbacks from iPhones with an emoji.",
                 checked = reactions,
                 onChange = { settings.showIphoneReactionsAsEmoji = it; reactions = it },
+            )
+            ToggleRow(
+                title = "Get SMS delivery reports",
+                subtitle = "Show \"Delivered\" under your sent texts when the carrier confirms.",
+                checked = delivery,
+                onChange = { settings.deliveryReports = it; delivery = it },
+            )
+            ToggleRow(
+                title = "Use simple characters",
+                subtitle = "Convert accents and smart quotes to plain text so messages " +
+                    "stay a single SMS segment.",
+                checked = simpleChars,
+                onChange = { settings.useSimpleCharacters = it; simpleChars = it },
+            )
+            ToggleRow(
+                title = "Pinch to zoom conversation text",
+                subtitle = "Pinch inside a conversation to resize the message text.",
+                checked = pinch,
+                onChange = { settings.pinchToZoom = it; pinch = it },
             )
 
             HorizontalDivider()

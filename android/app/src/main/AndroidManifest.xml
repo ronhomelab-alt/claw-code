@@ -86,6 +86,11 @@
             android:name=".MessageActionReceiver"
             android:exported="false" />
 
+        <!-- SMS delivery reports update sent-message status. -->
+        <receiver
+            android:name=".SmsStatusReceiver"
+            android:exported="false" />
+
         <!--
           Companion mode: while Google Messages stays the default app, we
           cannot stop delivery, but this listener dismisses its notifications

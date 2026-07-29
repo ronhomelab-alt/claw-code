@@ -43,6 +43,8 @@ data class ThreadMessage(
     val body: String,
     val dateMs: Long,
     val isOutgoing: Boolean,
+    /** SMS provider STATUS: -1 none, 0 delivered, 32 pending, 64 failed. */
+    val status: Int = -1,
 )
 
 /**
@@ -296,6 +298,7 @@ class MessagingRepository(private val context: Context) {
                 Telephony.Sms.BODY,
                 Telephony.Sms.DATE,
                 Telephony.Sms.TYPE,
+                Telephony.Sms.STATUS,
             ),
             "${Telephony.Sms.THREAD_ID} = ?",
             arrayOf(threadId.toString()),
@@ -308,6 +311,7 @@ class MessagingRepository(private val context: Context) {
                     body = cursor.getString(2) ?: "",
                     dateMs = cursor.getLong(3),
                     isOutgoing = cursor.getInt(4) != Telephony.Sms.MESSAGE_TYPE_INBOX,
+                    status = cursor.getInt(5),
                 )
             }
         }
@@ -324,26 +328,47 @@ class MessagingRepository(private val context: Context) {
         if (digits.length < 3 || trimmed.any { it.isLetter() }) {
             return SendResult.Failed("\"$trimmed\" is not a phone number")
         }
+        val settings = App.from(context).settings
+        val text = if (settings.useSimpleCharacters) SimpleChars.simplify(body) else body
+        val wantDelivery = settings.deliveryReports
         return try {
             val smsManager = smsManager()
                 ?: return SendResult.Failed("SMS service unavailable on this device")
-            val parts = smsManager.divideMessage(body)
-            if (parts.size == 1) {
-                smsManager.sendTextMessage(trimmed, null, body, null, null)
-            } else {
-                smsManager.sendMultipartTextMessage(trimmed, null, parts, null, null)
-            }
-            try {
+
+            // Record the sent message first so a delivery report can target its row.
+            val sentUri = try {
                 val values = ContentValues().apply {
                     put(Telephony.Sms.ADDRESS, trimmed)
-                    put(Telephony.Sms.BODY, body)
+                    put(Telephony.Sms.BODY, text)
                     put(Telephony.Sms.DATE, System.currentTimeMillis())
                     put(Telephony.Sms.READ, 1)
+                    if (wantDelivery) put(Telephony.Sms.STATUS, Telephony.Sms.STATUS_PENDING)
                 }
                 context.contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values)
             } catch (_: Exception) {
-                // Non-default apps may not be able to record sent messages;
-                // the SMS itself has already gone out.
+                null // Non-default apps may not record sent messages.
+            }
+
+            val deliveryIntent = if (wantDelivery && sentUri != null) {
+                android.app.PendingIntent.getBroadcast(
+                    context,
+                    sentUri.hashCode(),
+                    android.content.Intent(context, SmsStatusReceiver::class.java).setData(sentUri),
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                        android.app.PendingIntent.FLAG_IMMUTABLE,
+                )
+            } else {
+                null
+            }
+
+            val parts = smsManager.divideMessage(text)
+            if (parts.size == 1) {
+                smsManager.sendTextMessage(trimmed, null, text, null, deliveryIntent)
+            } else {
+                val deliveryIntents = deliveryIntent?.let { di ->
+                    ArrayList(List(parts.size) { di })
+                }
+                smsManager.sendMultipartTextMessage(trimmed, null, parts, null, deliveryIntents)
             }
             val threadId = try {
                 Telephony.Threads.getOrCreateThreadId(context, trimmed)

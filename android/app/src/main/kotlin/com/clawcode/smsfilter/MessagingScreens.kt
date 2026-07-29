@@ -64,16 +64,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.clawcode.smsfilter.core.PhoneNumbers
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -712,12 +715,15 @@ fun ThreadScreen(
     var draft by remember { mutableStateOf("") }
     var sendError by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
+    val settings = remember { App.from(context).settings }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var menuOpen by remember { mutableStateOf(false) }
     var showBlockTextDialog by remember { mutableStateOf(false) }
     var blockTextInput by remember { mutableStateOf("") }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var fontScale by remember { mutableFloatStateOf(settings.conversationTextScale) }
+    LaunchedEffect(fontScale) { settings.conversationTextScale = fontScale }
     val sendPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -888,11 +894,27 @@ fun ThreadScreen(
         Column(Modifier.padding(padding).fillMaxSize().imePadding()) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .then(
+                        if (settings.pinchToZoom) {
+                            Modifier.pointerInput(Unit) {
+                                androidx.compose.foundation.gestures.detectTransformGestures {
+                                    _, _, zoom, _ ->
+                                    fontScale = (fontScale * zoom).coerceIn(0.8f, 2.0f)
+                                }
+                            }
+                        } else {
+                            Modifier
+                        }
+                    ),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items(messages, key = { it.id }) { message -> MessageBubble(message) }
+                items(messages, key = { it.id }) { message ->
+                    MessageBubble(message, fontScale)
+                }
             }
             sendError?.let { error ->
                 Text(
@@ -960,13 +982,19 @@ internal fun withReactionEmoji(body: String, enabled: Boolean): String {
 }
 
 @Composable
-private fun MessageBubble(message: ThreadMessage) {
+private fun MessageBubble(message: ThreadMessage, fontScale: Float = 1f) {
     val outgoing = message.isOutgoing
     val context = androidx.compose.ui.platform.LocalContext.current
     val displayBody = withReactionEmoji(
         message.body,
         App.from(context).settings.showIphoneReactionsAsEmoji,
     )
+    // Delivery status for outgoing messages (only meaningful with reports on).
+    val deliveryLabel = if (outgoing) when (message.status) {
+        0 -> "Delivered"            // STATUS_COMPLETE
+        64 -> "Not delivered"       // STATUS_FAILED
+        else -> null
+    } else null
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = if (outgoing) Arrangement.End else Arrangement.Start,
@@ -988,6 +1016,8 @@ private fun MessageBubble(message: ThreadMessage) {
             Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Text(
                     displayBody,
+                    fontSize = 16.sp * fontScale,
+                    lineHeight = 22.sp * fontScale,
                     color = if (outgoing) {
                         MaterialTheme.colorScheme.onPrimary
                     } else {
@@ -995,11 +1025,14 @@ private fun MessageBubble(message: ThreadMessage) {
                     },
                 )
                 Text(
-                    DateUtils.formatDateTime(
-                        context,
-                        message.dateMs,
-                        DateUtils.FORMAT_SHOW_TIME,
-                    ),
+                    buildString {
+                        append(
+                            DateUtils.formatDateTime(
+                                context, message.dateMs, DateUtils.FORMAT_SHOW_TIME,
+                            )
+                        )
+                        deliveryLabel?.let { append(" · "); append(it) }
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = if (outgoing) {
                         MaterialTheme.colorScheme.onPrimary
