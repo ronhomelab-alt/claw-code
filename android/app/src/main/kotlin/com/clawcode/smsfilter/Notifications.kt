@@ -15,6 +15,8 @@ object Notifications {
     const val CHANNEL_ID = "incoming_sms"
     const val EXTRA_ADDRESS = "address"
     const val EXTRA_THREAD_ID = "thread_id"
+    const val EXTRA_NAME = "display_name"
+    const val EXTRA_BODY = "body"
     const val KEY_REPLY_TEXT = "reply_text"
 
     fun notifyIncoming(
@@ -75,11 +77,29 @@ object Notifications {
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
             .build()
 
+        val remindIntent = PendingIntent.getBroadcast(
+            context,
+            notificationId + 2_000_000,
+            Intent(context, MessageActionReceiver::class.java)
+                .setAction(MessageActionReceiver.ACTION_REMIND)
+                .putExtra(EXTRA_THREAD_ID, threadId)
+                .putExtra(EXTRA_ADDRESS, address)
+                .putExtra(EXTRA_NAME, displayName)
+                .putExtra(EXTRA_BODY, body),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val remindAction = NotificationCompat.Action.Builder(
+            android.R.drawable.ic_menu_recent_history,
+            "Remind 1 hr",
+            remindIntent,
+        ).build()
+
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_action_chat)
             .setContentIntent(openIntent)
             .addAction(replyAction)
             .addAction(markReadAction)
+            .addAction(remindAction)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
 

@@ -294,6 +294,43 @@ private fun BlockedTab(
     }
 }
 
+/** Read-only Protection & Safety summary: what's active and what's guaranteed. */
+@Composable
+private fun ProtectionCard(
+    ruleStore: RuleStore,
+    blockedLog: BlockedLog,
+    isDefaultSmsApp: () -> Boolean,
+) {
+    val rules by ruleStore.rules.collectAsState()
+    val log by blockedLog.entries.collectAsState()
+    val ruleCount = rules.textRules.size + rules.numberPatterns.size + rules.blockedNumbers.size
+    val mode = if (isDefaultSmsApp()) "Full blocking (default SMS app)"
+    else "Companion mode (needs setup below)"
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Protection & safety", style = MaterialTheme.typography.titleSmall)
+            Text("Mode: $mode", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "$ruleCount active rule(s) · ${log.size} message(s) filtered · " +
+                    "${rules.allowedNumbers.size} always-allowed",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            HorizontalDivider()
+            Text("Always-on guarantees", style = MaterialTheme.typography.bodyMedium)
+            listOf(
+                "No internet permission — rules and messages never leave your phone.",
+                "Links in messages are never auto-opened.",
+                "MMS attachments are never auto-downloaded.",
+                "Saved contacts are exempt from area-code and keyword rules.",
+                "One-time passcodes are never blocked by keyword rules.",
+            ).forEach { line ->
+                Text("•  $line", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
 /** Theme, message-organization, and behavior settings (Google-Messages-style). */
 @Composable
 private fun AppearanceCard(settings: AppSettings) {
@@ -509,6 +546,7 @@ private fun SetupTab(
         Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        ProtectionCard(ruleStore, blockedLog, isDefaultSmsApp)
         AppearanceCard(settings)
         CleanupCard(ruleStore, blockedLog, repository)
         crashText?.let { trace ->
