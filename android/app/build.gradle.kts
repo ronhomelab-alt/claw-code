@@ -12,8 +12,8 @@ android {
         applicationId = "com.clawcode.smsfilter"
         minSdk = 29 // Android 10: RoleManager for the default-SMS-app role
         targetSdk = 35
-        versionCode = 22
-        versionName = "0.7.4"
+        versionCode = 23
+        versionName = "0.7.5"
     }
 
     // Sign every debug build with the same committed keystore so updates
@@ -26,6 +26,33 @@ android {
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
+        }
+        // Release signing sourced from CI secrets / env — never committed.
+        // Falls back to the debug key when no release keystore is provided so
+        // `assembleRelease` still yields an installable APK for personal use.
+        create("release") {
+            val ksPath = System.getenv("RELEASE_KEYSTORE_FILE")
+            if (ksPath != null && java.io.File(ksPath).exists()) {
+                storeFile = java.io.File(ksPath)
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+            } else {
+                storeFile = rootProject.file("debug.keystore")
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            // Non-debuggable so app data can't be read over ADB (audit #4).
+            // Minify stays off to avoid R8/Compose keep-rule breakage.
+            isMinifyEnabled = false
+            isDebuggable = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
