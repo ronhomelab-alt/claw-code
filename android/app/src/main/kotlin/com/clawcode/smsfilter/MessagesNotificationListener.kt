@@ -37,10 +37,13 @@ class MessagesNotificationListener : NotificationListenerService() {
             ?: ""
 
         val app = App.from(this)
-        // The notification title is the sender: a contact NAME for known
-        // contacts (letters), or a bare number for unknown senders. Either
-        // signals a contact → exempt from text rules.
-        val isContact = title.any { it.isLetter() } || app.messagingRepository.isContact(title)
+        // The notification title is the sender: a contact NAME for saved
+        // contacts, or a number / alphanumeric sender ID otherwise. Only a
+        // VERIFIED contact (by number or exact display-name match) is exempt
+        // from text rules — "contains letters" alone would let alphanumeric
+        // spam sender IDs bypass the filter.
+        val isContact = app.messagingRepository.isContact(title) ||
+            app.messagingRepository.isContactName(title)
         when (val verdict = app.ruleStore.engine().evaluate(title, text, isContact)) {
             is Verdict.Block -> {
                 cancelNotification(sbn.key)

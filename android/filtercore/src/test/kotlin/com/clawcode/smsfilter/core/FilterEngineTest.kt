@@ -194,6 +194,19 @@ class TextNormalizerTest {
         assertEquals("toptiersoiar", TextNormalizer.canonical("T0p-T1er $0lar"))
         assertEquals(TextNormalizer.canonical("solar"), TextNormalizer.canonical("S0LAR"))
     }
+
+    @Test
+    fun `cyrillic and greek homoglyph spoofing still matches the rule`() {
+        // "Тор Тiеr Ѕоlаr": Cyrillic Т/о/р/е/Ѕ/а mixed into Latin text.
+        assertIs<Verdict.Block>(
+            engine.evaluate("(555) 555-0100", "Тор Тiеr Ѕоlаr has an offer for you")
+        )
+        // Greek omicron/alpha spoof.
+        assertIs<Verdict.Block>(
+            engine.evaluate("(555) 555-0100", "tοp tier sοlαr deal")
+        )
+        assertEquals(TextNormalizer.canonical("Top Tier Solar"), TextNormalizer.canonical("Тор Тiеr Ѕоlаr"))
+    }
 }
 
 class RuleSetCodecTest {

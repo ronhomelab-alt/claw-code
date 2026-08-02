@@ -461,6 +461,29 @@ class MessagingRepository(private val context: Context) {
         }
     }
 
+    /**
+     * True if [name] exactly matches a saved contact's display name. Used by
+     * companion mode, where notifications show contact names rather than
+     * numbers. Exact match only — a spammer's alphanumeric sender ID must not
+     * pass just because it contains letters.
+     */
+    fun isContactName(name: String): Boolean {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return false
+        return try {
+            context.contentResolver.query(
+                ContactsContract.Contacts.CONTENT_URI,
+                arrayOf(ContactsContract.Contacts._ID),
+                "${ContactsContract.Contacts.DISPLAY_NAME_PRIMARY} = ?",
+                arrayOf(trimmed),
+                null,
+            )?.use { it.moveToFirst() } ?: false
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "contact-name lookup failed", e)
+            false
+        }
+    }
+
     /** Contact display name for [address], falling back to the number itself. */
     fun displayName(address: String): String {
         if (address.isBlank()) return address
