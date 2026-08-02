@@ -29,17 +29,29 @@ jobs:
       - name: Run filter engine tests
         run: gradle -p android :filtercore:test
 
-      # Non-debuggable release build. When RELEASE_KEYSTORE_BASE64 secret is
-      # present it is signed with that (never-public) key; otherwise it falls
+      # Non-debuggable release build. When the RELEASE_KEYSTORE_BASE64 secret
+      # is set it is signed with that (never-public) key; otherwise it falls
       # back to the debug key so personal builds still install in place.
+      # (secrets can't be used in `if:`, so we map to env and check in shell.)
       - name: Decode release keystore (if configured)
-        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+        env:
+          KS_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > /tmp/release.keystore
-          echo "RELEASE_KEYSTORE_FILE=/tmp/release.keystore" >> "$GITHUB_ENV"
-          echo "RELEASE_KEYSTORE_PASSWORD=${{ secrets.RELEASE_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
-          echo "RELEASE_KEY_ALIAS=${{ secrets.RELEASE_KEY_ALIAS }}" >> "$GITHUB_ENV"
-          echo "RELEASE_KEY_PASSWORD=${{ secrets.RELEASE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > /tmp/release.keystore
+            {
+              echo "RELEASE_KEYSTORE_FILE=/tmp/release.keystore"
+              echo "RELEASE_KEYSTORE_PASSWORD=$KS_PASS"
+              echo "RELEASE_KEY_ALIAS=$KEY_ALIAS"
+              echo "RELEASE_KEY_PASSWORD=$KEY_PASS"
+            } >> "$GITHUB_ENV"
+            echo "Release keystore configured."
+          else
+            echo "No release keystore secret; release build will use the debug key."
+          fi
 
       - name: Build release APK
         run: gradle -p android :app:assembleRelease
