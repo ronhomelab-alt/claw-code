@@ -12,8 +12,8 @@ android {
         applicationId = "com.clawcode.smsfilter"
         minSdk = 29 // Android 10: RoleManager for the default-SMS-app role
         targetSdk = 35
-        versionCode = 24
-        versionName = "0.7.6"
+        versionCode = 25
+        versionName = "0.7.7"
     }
 
     // Sign every debug build with the same committed keystore so updates
@@ -32,8 +32,10 @@ android {
         // `assembleRelease` still yields an installable APK for personal use.
         create("release") {
             val ksPath = System.getenv("RELEASE_KEYSTORE_FILE")
-            if (ksPath != null && java.io.File(ksPath).exists()) {
-                storeFile = java.io.File(ksPath)
+            // rootProject.file() returns absolute paths as-is (same API the
+            // debug config uses); java.io.File won't resolve in this DSL scope.
+            if (ksPath != null && rootProject.file(ksPath).exists()) {
+                storeFile = rootProject.file(ksPath)
                 storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("RELEASE_KEY_ALIAS")
                 keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
