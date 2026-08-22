@@ -12,8 +12,8 @@ android {
         applicationId = "com.clawcode.smsfilter"
         minSdk = 29 // Android 10: RoleManager for the default-SMS-app role
         targetSdk = 35
-        versionCode = 27
-        versionName = "0.7.9"
+        versionCode = 28
+        versionName = "0.7.10"
     }
 
     // Sign every debug build with the same committed keystore so updates

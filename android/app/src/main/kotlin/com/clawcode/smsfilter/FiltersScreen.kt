@@ -327,6 +327,16 @@ private fun ProtectionCard(
             ).forEach { line ->
                 Text("•  $line", style = MaterialTheme.typography.bodySmall)
             }
+            HorizontalDivider()
+            Text(
+                "Heads-up: RCS chats received while Google Messages was your " +
+                    "default app live only inside Google Messages — Android gives " +
+                    "no app access to another app's RCS history. Open Google " +
+                    "Messages to read them. While this app is default, incoming " +
+                    "texts arrive as SMS and appear here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

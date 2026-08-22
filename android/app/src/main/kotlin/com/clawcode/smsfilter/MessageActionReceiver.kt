@@ -55,13 +55,17 @@ class MessageActionReceiver : BroadcastReceiver() {
                 )
             }
             ACTION_REMIND_FIRE -> {
-                Notifications.notifyIncoming(
-                    context = context,
-                    threadId = threadId,
-                    address = intent.getStringExtra(Notifications.EXTRA_ADDRESS) ?: "",
-                    displayName = intent.getStringExtra(Notifications.EXTRA_NAME) ?: "",
-                    body = intent.getStringExtra(Notifications.EXTRA_BODY) ?: "",
-                )
+                // Skip the reminder if the thread was read in the meantime —
+                // re-posting would resurrect the launcher badge for nothing.
+                if (app.messagingRepository.hasUnread(threadId)) {
+                    Notifications.notifyIncoming(
+                        context = context,
+                        threadId = threadId,
+                        address = intent.getStringExtra(Notifications.EXTRA_ADDRESS) ?: "",
+                        displayName = intent.getStringExtra(Notifications.EXTRA_NAME) ?: "",
+                        body = intent.getStringExtra(Notifications.EXTRA_BODY) ?: "",
+                    )
+                }
             }
         }
     }

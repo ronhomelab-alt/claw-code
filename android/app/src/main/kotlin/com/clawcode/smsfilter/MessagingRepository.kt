@@ -405,6 +405,28 @@ class MessagingRepository(private val context: Context) {
             // Non-default SMS apps may not be allowed to update the provider.
             android.util.Log.w(TAG, "could not mark thread $threadId read", e)
         }
+        // Reading a thread must also clear its notification, or the launcher
+        // badge keeps counting the stale notification forever.
+        try {
+            Notifications.cancel(context, threadId)
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "could not cancel notification for $threadId", e)
+        }
+    }
+
+    /** True if the thread still has unread incoming messages. */
+    fun hasUnread(threadId: Long): Boolean = try {
+        context.contentResolver.query(
+            Telephony.Sms.CONTENT_URI,
+            arrayOf(Telephony.Sms._ID),
+            "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.READ} = 0 AND " +
+                "${Telephony.Sms.TYPE} = ${Telephony.Sms.MESSAGE_TYPE_INBOX}",
+            arrayOf(threadId.toString()),
+            null,
+        )?.use { it.moveToFirst() } ?: false
+    } catch (e: Exception) {
+        android.util.Log.w(TAG, "hasUnread failed for $threadId", e)
+        false
     }
 
     /** Contacts whose name or number matches [query], for compose-time autocomplete. */
