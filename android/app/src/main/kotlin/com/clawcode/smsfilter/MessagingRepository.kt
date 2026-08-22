@@ -19,6 +19,8 @@ data class Conversation(
     val snippet: String,
     val dateMs: Long,
     val unreadCount: Int,
+    /** Contact-book photo thumbnail URI, when the sender is a saved contact. */
+    val photoUri: String? = null,
 )
 
 sealed class SendResult {
@@ -29,6 +31,7 @@ sealed class SendResult {
 data class ContactMatch(
     val name: String,
     val number: String,
+    val photoUri: String? = null,
 )
 
 data class InboxMessage(
@@ -45,6 +48,8 @@ data class ThreadMessage(
     val isOutgoing: Boolean,
     /** SMS provider STATUS: -1 none, 0 delivered, 32 pending, 64 failed. */
     val status: Int = -1,
+    /** SMS provider TYPE — distinguishes sent/outbox/queued/failed rows. */
+    val type: Int = 0,
 )
 
 /**
@@ -59,6 +64,9 @@ class MessagingRepository(private val context: Context) {
     val changeTick: StateFlow<Long> = _changeTick
 
     private val nameCache = mutableMapOf<String, String>()
+
+    /** address → contact photo thumbnail URI (null cached too, to skip re-queries). */
+    private val photoCache = mutableMapOf<String, String?>()
 
     init {
         try {
@@ -267,6 +275,7 @@ class MessagingRepository(private val context: Context) {
                         snippet = body,
                         dateMs = date,
                         unreadCount = unread,
+                        photoUri = contactPhotoUri(address),
                     )
                 } else if (unread > 0) {
                     byThread[threadId] =
@@ -312,6 +321,7 @@ class MessagingRepository(private val context: Context) {
                     dateMs = cursor.getLong(3),
                     isOutgoing = cursor.getInt(4) != Telephony.Sms.MESSAGE_TYPE_INBOX,
                     status = cursor.getInt(5),
+                    type = cursor.getInt(4),
                 )
             }
         }
@@ -449,6 +459,7 @@ class MessagingRepository(private val context: Context) {
             arrayOf(
                 ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
                 ContactsContract.CommonDataKinds.Phone.NUMBER,
+                ContactsContract.CommonDataKinds.Phone.PHOTO_THUMBNAIL_URI,
             ),
             null,
             null,
@@ -456,10 +467,40 @@ class MessagingRepository(private val context: Context) {
         )?.use { cursor ->
             while (cursor.moveToNext() && result.size < limit) {
                 val number = cursor.getString(1) ?: continue
-                result += ContactMatch(name = cursor.getString(0) ?: number, number = number)
+                result += ContactMatch(
+                    name = cursor.getString(0) ?: number,
+                    number = number,
+                    photoUri = cursor.getString(2),
+                )
             }
         }
         return result.distinctBy { it.number.filter(Char::isDigit) }
+    }
+
+    /** Contact-book photo thumbnail URI for [address], or null when none. */
+    fun contactPhotoUri(address: String): String? {
+        if (address.isBlank()) return null
+        if (photoCache.containsKey(address)) return photoCache[address]
+        val uri = try {
+            val lookup = Uri.withAppendedPath(
+                ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
+                Uri.encode(address),
+            )
+            context.contentResolver.query(
+                lookup,
+                arrayOf(ContactsContract.PhoneLookup.PHOTO_THUMBNAIL_URI),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "photo lookup failed", e)
+            null
+        }
+        photoCache[address] = uri
+        return uri
     }
 
     /** True if [address] matches a saved contact (used to exempt them from text rules). */

@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -252,7 +253,10 @@ private fun BlockedTab(
         if (all == null) {
             Text("Loading…")
         } else if (blockedConversations.isEmpty() && logOnlySenders.isEmpty()) {
-            Text("No blocked conversations.")
+            EmptyState(
+                icon = Icons.Default.CheckCircle,
+                message = "Nothing blocked right now — your inbox is clean",
+            )
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(blockedConversations, key = { it.threadId }) { conversation ->

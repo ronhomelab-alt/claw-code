@@ -35,10 +35,13 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -66,7 +69,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -339,9 +344,15 @@ fun ConversationsScreen(
                     CircularProgressIndicator()
                 }
 
-                list.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No conversations here")
-                }
+                list.isEmpty() -> EmptyState(
+                    icon = Icons.Default.Email,
+                    message = when (folder) {
+                        Folder.All -> "No conversations yet — tap + to start one"
+                        Folder.Starred -> "No starred conversations"
+                        Folder.Important -> "Nothing marked important"
+                        is Folder.Labeled -> "No conversations with this label"
+                    },
+                )
 
                 else -> LazyColumn(Modifier.fillMaxSize()) {
                     items(list, key = { it.threadId }) { conversation ->
@@ -593,7 +604,7 @@ internal fun ConversationRow(
             androidx.compose.material3.Checkbox(checked = selected, onCheckedChange = null)
             androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
         }
-        Avatar(conversation.displayName)
+        ContactAvatar(conversation.displayName, conversation.photoUri)
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (meta.important) {
@@ -685,17 +696,26 @@ private fun StarIcon(starred: Boolean) {
     )
 }
 
+/** Friendly centered empty state: a dim icon over an explanatory line. */
 @Composable
-private fun Avatar(name: String) {
-    Box(
-        Modifier.size(44.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            name.firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "#",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
-        )
+internal fun EmptyState(icon: androidx.compose.ui.graphics.vector.ImageVector, message: String) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(48.dp),
+                tint = MaterialTheme.colorScheme.outline,
+            )
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -727,6 +747,8 @@ fun ThreadScreen(
     val tick by repository.changeTick.collectAsState()
     val metaMap by metaStore.meta.collectAsState()
     val meta = metaMap[metaStore.keyFor(address)] ?: ThreadMeta()
+    val rules by ruleStore.rules.collectAsState()
+    val logEntries by blockedLog.entries.collectAsState()
     var showLabelDialog by remember { mutableStateOf(false) }
     var messages by remember { mutableStateOf(emptyList<ThreadMessage>()) }
     var draft by remember { mutableStateOf("") }
@@ -747,12 +769,25 @@ fun ThreadScreen(
         sendError = if (granted) null else SEND_PERMISSION_HELP
     }
     val listState = rememberLazyListState()
+    var loadedCount by remember { mutableIntStateOf(0) }
+    var newWhileAway by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(tick, threadId) {
-        messages = withContext(Dispatchers.IO) {
+        val fresh = withContext(Dispatchers.IO) {
             repository.messages(threadId).also { repository.markThreadRead(threadId) }
         }
-        if (messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex)
+        // Follow the bottom while the user is there; if they scrolled up to
+        // read, don't yank them down — count arrivals for the "new" chip.
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        val wasAtBottom = loadedCount == 0 || lastVisible >= loadedCount - 2
+        messages = fresh
+        if (fresh.isNotEmpty() && wasAtBottom) {
+            listState.scrollToItem(fresh.lastIndex)
+            newWhileAway = 0
+        } else if (fresh.size > loadedCount) {
+            newWhileAway += fresh.size - loadedCount
+        }
+        loadedCount = fresh.size
     }
 
     fun blockNumber() {
@@ -858,7 +893,21 @@ fun ThreadScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(repository.displayName(address)) },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ContactAvatar(
+                            name = repository.displayName(address),
+                            photoUri = remember(address) { repository.contactPhotoUri(address) },
+                            size = 36.dp,
+                        )
+                        androidx.compose.foundation.layout.Spacer(Modifier.size(10.dp))
+                        Text(
+                            repository.displayName(address),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -909,34 +958,150 @@ fun ThreadScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().imePadding()) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .then(
-                        if (settings.pinchToZoom) {
-                            Modifier.pointerInput(Unit) {
-                                detectTransformGestures { _: Offset, _: Offset, zoom: Float, _: Float ->
-                                    fontScale = (fontScale * zoom).coerceIn(0.8f, 2.0f)
+            // Quiet banner when this sender is currently blocked, naming the
+            // rule that fired, with a one-tap way back out.
+            val digits = remember(address) { PhoneNumbers.normalize(address) }
+            val blockedReason = if (
+                digits.isNotEmpty() &&
+                (digits in rules.blockedNumbers || logEntries.any {
+                    PhoneNumbers.normalize(it.sender) == digits
+                })
+            ) {
+                logEntries.lastOrNull { PhoneNumbers.normalize(it.sender) == digits }?.reason
+                    ?: "number is on your block list"
+            } else {
+                null
+            }
+            blockedReason?.let { reason ->
+                Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                            Text(
+                                "Blocked as spam",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                reason,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(onClick = {
+                            ruleStore.update { it.copy(blockedNumbers = it.blockedNumbers - digits) }
+                            blockedLog.removeSender(digits)
+                        }) { Text("Not spam") }
+                    }
+                }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(
+                            if (settings.pinchToZoom) {
+                                Modifier.pointerInput(Unit) {
+                                    detectTransformGestures { _: Offset, _: Offset, zoom: Float, _: Float ->
+                                        fontScale = (fontScale * zoom).coerceIn(0.8f, 2.0f)
+                                    }
+                                }
+                            } else {
+                                Modifier
+                            }
+                        ),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                ) {
+                    itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
+                        // Show a centered date/time separator above the first
+                        // message and whenever a new day starts or there's a gap
+                        // over an hour — Google-Messages style.
+                        val prev = messages.getOrNull(index - 1)
+                        val next = messages.getOrNull(index + 1)
+                        val needsSeparator =
+                            prev == null || newSeparatorNeeded(prev.dateMs, message.dateMs)
+                        if (needsSeparator) {
+                            DateSeparator(message.dateMs)
+                        }
+                        // Back-to-back bubbles from the same side tighten up:
+                        // squared inner corners, timestamp only on the last.
+                        val groupedWithPrev =
+                            !needsSeparator && prev != null && sameBubbleGroup(prev, message)
+                        val groupedWithNext = next != null &&
+                            !newSeparatorNeeded(message.dateMs, next.dateMs) &&
+                            sameBubbleGroup(message, next)
+                        MessageBubble(
+                            message = message,
+                            fontScale = fontScale,
+                            groupedWithPrev = groupedWithPrev,
+                            groupedWithNext = groupedWithNext,
+                            onRetry = {
+                                when (val result = repository.send(address, message.body)) {
+                                    is SendResult.Sent -> scope.launch {
+                                        snackbarHostState.showSnackbar("Message re-sent")
+                                    }
+                                    is SendResult.Failed -> scope.launch {
+                                        snackbarHostState.showSnackbar(result.reason)
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
+                // Floating jump-to-latest chip once the user scrolls up.
+                val atBottom by remember {
+                    derivedStateOf {
+                        val info = listState.layoutInfo
+                        val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+                        info.totalItemsCount == 0 || last >= info.totalItemsCount - 2
+                    }
+                }
+                LaunchedEffect(atBottom) { if (atBottom) newWhileAway = 0 }
+                if (!atBottom) {
+                    Surface(
+                        onClick = {
+                            scope.launch {
+                                if (messages.isNotEmpty()) {
+                                    listState.animateScrollToItem(messages.lastIndex)
                                 }
                             }
-                        } else {
-                            Modifier
+                        },
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (newWhileAway > 0) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceVariant,
+                        shadowElevation = 4.dp,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 12.dp),
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (newWhileAway > 0) {
+                                Text(
+                                    if (newWhileAway == 1) "1 new message"
+                                    else "$newWhileAway new messages",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(end = 4.dp),
+                                )
+                            }
+                            Icon(
+                                Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Jump to latest",
+                            )
                         }
-                    ),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
-                    // Show a centered date/time separator above the first
-                    // message and whenever a new day starts or there's a gap
-                    // over an hour — Google-Messages style.
-                    val prev = messages.getOrNull(index - 1)
-                    if (prev == null || newSeparatorNeeded(prev.dateMs, message.dateMs)) {
-                        DateSeparator(message.dateMs)
                     }
-                    MessageBubble(message, fontScale)
                 }
             }
             sendError?.let { error ->
@@ -947,42 +1112,34 @@ fun ThreadScreen(
                     modifier = Modifier.padding(horizontal = 12.dp),
                 )
             }
-            Row(
-                Modifier.fillMaxWidth().padding(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Text message") },
-                    maxLines = 4,
-                )
-                IconButton(
-                    onClick = {
-                        val text = draft.trim()
-                        if (text.isEmpty()) return@IconButton
-                        if (!hasSendPermission(context)) {
-                            sendError = SEND_PERMISSION_HELP
-                            sendPermissionLauncher.launch(Manifest.permission.SEND_SMS)
-                            return@IconButton
+            PillComposer(
+                value = draft,
+                onValueChange = { draft = it },
+                sendEnabled = true,
+                onSend = {
+                    val text = draft.trim()
+                    if (text.isEmpty()) return@PillComposer
+                    if (!hasSendPermission(context)) {
+                        sendError = SEND_PERMISSION_HELP
+                        sendPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+                        return@PillComposer
+                    }
+                    when (val result = repository.send(address, text)) {
+                        is SendResult.Sent -> {
+                            draft = ""
+                            sendError = null
                         }
-                        when (val result = repository.send(address, text)) {
-                            is SendResult.Sent -> {
-                                draft = ""
-                                sendError = null
-                            }
-                            is SendResult.Failed -> sendError = result.reason
-                        }
-                    },
-                    enabled = draft.isNotBlank(),
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
-                }
-            }
+                        is SendResult.Failed -> sendError = result.reason
+                    }
+                },
+            )
         }
     }
 }
+
+/** Bubbles group when they're from the same side within a few minutes. */
+private fun sameBubbleGroup(a: ThreadMessage, b: ThreadMessage): Boolean =
+    a.isOutgoing == b.isOutgoing && (b.dateMs - a.dateMs) < 3L * 60 * 1000
 
 /** True when a new date/time separator should precede a message. */
 private fun newSeparatorNeeded(prevMs: Long, curMs: Long): Boolean {
@@ -1038,64 +1195,102 @@ internal fun withReactionEmoji(body: String, enabled: Boolean): String {
 }
 
 @Composable
-private fun MessageBubble(message: ThreadMessage, fontScale: Float = 1f) {
+private fun MessageBubble(
+    message: ThreadMessage,
+    fontScale: Float = 1f,
+    groupedWithPrev: Boolean = false,
+    groupedWithNext: Boolean = false,
+    onRetry: (() -> Unit)? = null,
+) {
     val outgoing = message.isOutgoing
     val context = androidx.compose.ui.platform.LocalContext.current
     val displayBody = withReactionEmoji(
         message.body,
         App.from(context).settings.showIphoneReactionsAsEmoji,
     )
-    // Delivery status for outgoing messages (only meaningful with reports on).
-    val deliveryLabel = if (outgoing) when (message.status) {
-        0 -> "Delivered"            // STATUS_COMPLETE
-        64 -> "Not delivered"       // STATUS_FAILED
+    // Life-cycle label for outgoing messages: still sending, failed to send,
+    // or delivered (the latter only meaningful with delivery reports on).
+    val failed = outgoing && (
+        message.type == android.provider.Telephony.Sms.MESSAGE_TYPE_FAILED ||
+            message.status == 64 // STATUS_FAILED
+        )
+    val sending = outgoing && !failed && (
+        message.type == android.provider.Telephony.Sms.MESSAGE_TYPE_OUTBOX ||
+            message.type == android.provider.Telephony.Sms.MESSAGE_TYPE_QUEUED
+        )
+    val deliveryLabel = when {
+        failed -> "Not sent · Tap to retry"
+        sending -> "Sending…"
+        outgoing && message.status == 0 -> "Delivered" // STATUS_COMPLETE
         else -> null
-    } else null
+    }
+    // Grouped bubbles: inner corners square off, tail only on the last one.
+    val big = 18.dp
+    val small = 6.dp
+    val tail = 4.dp
     Row(
-        Modifier.fillMaxWidth(),
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = if (groupedWithNext) 2.dp else 8.dp),
         horizontalArrangement = if (outgoing) Arrangement.End else Arrangement.Start,
     ) {
         Surface(
-            color = if (outgoing) {
+            color = if (failed) {
+                MaterialTheme.colorScheme.errorContainer
+            } else if (outgoing) {
                 MaterialTheme.colorScheme.primary
             } else {
                 MaterialTheme.colorScheme.surfaceVariant
             },
             shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (outgoing) 16.dp else 4.dp,
-                bottomEnd = if (outgoing) 4.dp else 16.dp,
+                topStart = if (!outgoing && groupedWithPrev) small else big,
+                topEnd = if (outgoing && groupedWithPrev) small else big,
+                bottomStart = when {
+                    outgoing -> big
+                    groupedWithNext -> small
+                    else -> tail
+                },
+                bottomEnd = when {
+                    !outgoing -> big
+                    groupedWithNext -> small
+                    else -> tail
+                },
             ),
-            modifier = Modifier.widthIn(max = 300.dp),
+            modifier = Modifier
+                .widthIn(max = 300.dp)
+                .then(
+                    if (failed && onRetry != null) Modifier.clickable { onRetry() }
+                    else Modifier
+                ),
         ) {
+            val contentColor = when {
+                failed -> MaterialTheme.colorScheme.onErrorContainer
+                outgoing -> MaterialTheme.colorScheme.onPrimary
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
             Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Text(
                     displayBody,
                     fontSize = 16.sp * fontScale,
                     lineHeight = 22.sp * fontScale,
-                    color = if (outgoing) {
-                        MaterialTheme.colorScheme.onPrimary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
+                    color = contentColor,
                 )
-                Text(
-                    buildString {
-                        append(
-                            DateUtils.formatDateTime(
-                                context, message.dateMs, DateUtils.FORMAT_SHOW_TIME,
+                // Timestamp on the last bubble of a group; always on failures.
+                if (!groupedWithNext || deliveryLabel != null) {
+                    Text(
+                        buildString {
+                            append(
+                                DateUtils.formatDateTime(
+                                    context, message.dateMs, DateUtils.FORMAT_SHOW_TIME,
+                                )
                             )
-                        )
-                        deliveryLabel?.let { append(" · "); append(it) }
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (outgoing) {
-                        MaterialTheme.colorScheme.onPrimary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
+                            deliveryLabel?.let { append(" · "); append(it) }
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = if (failed) FontWeight.Bold else FontWeight.Normal,
+                        color = contentColor,
+                    )
+                }
             }
         }
     }
@@ -1210,6 +1405,14 @@ fun NewMessageScreen(
                                 selected = false,
                                 onClick = { recipients = recipients - chip },
                                 label = { Text(chip.name) },
+                                avatar = { ContactAvatar(chip.name, chip.photoUri, 24.dp) },
+                                trailingIcon = {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Remove ${chip.name}",
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                },
                             )
                         }
                     }
@@ -1239,10 +1442,14 @@ fun NewMessageScreen(
                             Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Avatar(match.name)
+                            ContactAvatar(match.name, match.photoUri)
                             Column(Modifier.padding(start = 12.dp)) {
                                 Text(match.name, style = MaterialTheme.typography.titleSmall)
-                                Text(match.number, style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    match.number,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
                         }
                     }
@@ -1256,27 +1463,13 @@ fun NewMessageScreen(
                     )
                 }
             }
-            // ...and the message box + send button stay pinned above the keyboard.
-            Row(
-                Modifier.fillMaxWidth().padding(8.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                OutlinedTextField(
-                    value = body,
-                    onValueChange = { body = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Text message") },
-                    minLines = 2,
-                    maxLines = 6,
-                )
-                IconButton(
-                    onClick = { doSend() },
-                    enabled = body.isNotBlank() &&
-                        (recipients.isNotEmpty() || recipient.isNotBlank()),
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
-                }
-            }
+            // ...and the compose pill + send button stay pinned above the keyboard.
+            PillComposer(
+                value = body,
+                onValueChange = { body = it },
+                sendEnabled = recipients.isNotEmpty() || recipient.isNotBlank(),
+                onSend = { doSend() },
+            )
         }
     }
 }
@@ -1335,13 +1528,14 @@ fun SearchScreen(
                 all == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-                q.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Type to search your messages")
-                }
-                results.isEmpty() -> Box(
-                    Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) { Text("No matches") }
+                q.isEmpty() -> EmptyState(
+                    icon = Icons.Default.Search,
+                    message = "Type to search your messages",
+                )
+                results.isEmpty() -> EmptyState(
+                    icon = Icons.Default.Search,
+                    message = "No matches for \"${query.trim()}\"",
+                )
                 else -> LazyColumn(Modifier.fillMaxSize()) {
                     items(results, key = { it.threadId }) { conversation ->
                         ConversationRow(
