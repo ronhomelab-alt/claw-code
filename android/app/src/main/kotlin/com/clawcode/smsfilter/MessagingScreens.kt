@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -927,9 +928,7 @@ fun ThreadScreen(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                androidx.compose.foundation.lazy.itemsIndexed(
-                    messages, key = { _, m -> m.id }
-                ) { index, message ->
+                itemsIndexed(messages, key = { _, m -> m.id }) { index, message ->
                     // Show a centered date/time separator above the first
                     // message and whenever a new day starts or there's a gap
                     // over an hour — Google-Messages style.
