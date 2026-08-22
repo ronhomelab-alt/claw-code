@@ -605,6 +605,9 @@ internal fun ConversationRow(
                 Text(
                     conversation.displayName,
                     style = MaterialTheme.typography.titleMedium,
+                    // Unread = full-strength + bold; read = grayer + normal.
+                    color = if (unread) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = if (unread) FontWeight.Bold else FontWeight.Normal,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -622,6 +625,8 @@ internal fun ConversationRow(
             Text(
                 conversation.snippet,
                 style = MaterialTheme.typography.bodyMedium,
+                color = if (unread) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 fontWeight = if (unread) FontWeight.Bold else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -640,18 +645,27 @@ internal fun ConversationRow(
             Text(
                 DateUtils.getRelativeTimeSpanString(conversation.dateMs).toString(),
                 style = MaterialTheme.typography.labelSmall,
+                // Blue + bold timestamp signals unread, like Google Messages.
+                color = if (unread) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (unread) FontWeight.Bold else FontWeight.Normal,
             )
-            if (!selectionMode && onStarToggle != null) {
-                IconButton(onClick = onStarToggle, modifier = Modifier.size(28.dp)) {
-                    StarIcon(meta.starred)
+            androidx.compose.foundation.layout.Spacer(Modifier.size(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (!selectionMode && onStarToggle != null) {
+                    IconButton(onClick = onStarToggle, modifier = Modifier.size(28.dp)) {
+                        StarIcon(meta.starred)
+                    }
                 }
-            } else if (unread) {
-                Box(
-                    Modifier
-                        .padding(top = 4.dp)
-                        .size(10.dp)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape)
-                )
+                // Prominent blue unread dot — shown alongside the star.
+                if (unread) {
+                    androidx.compose.foundation.layout.Spacer(Modifier.size(4.dp))
+                    Box(
+                        Modifier
+                            .size(12.dp)
+                            .background(MaterialTheme.colorScheme.primary, CircleShape)
+                    )
+                }
             }
         }
     }
@@ -913,7 +927,16 @@ fun ThreadScreen(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items(messages, key = { it.id }) { message ->
+                androidx.compose.foundation.lazy.itemsIndexed(
+                    messages, key = { _, m -> m.id }
+                ) { index, message ->
+                    // Show a centered date/time separator above the first
+                    // message and whenever a new day starts or there's a gap
+                    // over an hour — Google-Messages style.
+                    val prev = messages.getOrNull(index - 1)
+                    if (prev == null || newSeparatorNeeded(prev.dateMs, message.dateMs)) {
+                        DateSeparator(message.dateMs)
+                    }
                     MessageBubble(message, fontScale)
                 }
             }
@@ -959,6 +982,39 @@ fun ThreadScreen(
                 }
             }
         }
+    }
+}
+
+/** True when a new date/time separator should precede a message. */
+private fun newSeparatorNeeded(prevMs: Long, curMs: Long): Boolean {
+    val a = java.util.Calendar.getInstance().apply { timeInMillis = prevMs }
+    val b = java.util.Calendar.getInstance().apply { timeInMillis = curMs }
+    val sameDay = a.get(java.util.Calendar.YEAR) == b.get(java.util.Calendar.YEAR) &&
+        a.get(java.util.Calendar.DAY_OF_YEAR) == b.get(java.util.Calendar.DAY_OF_YEAR)
+    return !sameDay || (curMs - prevMs) > 60L * 60 * 1000
+}
+
+/** Centered "Today • 6:05 PM" / "Yesterday • 6:05 PM" / "Fri, Jul 17 • 6:05 PM" separator. */
+@Composable
+private fun DateSeparator(dateMs: Long) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val dayLabel = when {
+        DateUtils.isToday(dateMs) -> "Today"
+        DateUtils.isToday(dateMs + 24L * 60 * 60 * 1000) -> "Yesterday"
+        else -> DateUtils.formatDateTime(
+            context, dateMs,
+            DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_WEEKDAY or
+                DateUtils.FORMAT_ABBREV_ALL,
+        )
+    }
+    val time = DateUtils.formatDateTime(context, dateMs, DateUtils.FORMAT_SHOW_TIME)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+        Text(
+            "$dayLabel • $time",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 6.dp),
+        )
     }
 }
 
