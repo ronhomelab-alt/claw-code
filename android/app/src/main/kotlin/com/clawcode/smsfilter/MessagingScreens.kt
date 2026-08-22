@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -957,7 +956,7 @@ fun ThreadScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize().imePadding()) {
+        Column(Modifier.padding(padding).fillMaxSize()) {
             // Quiet banner when this sender is currently blocked, naming the
             // rule that fired, with a one-tap way back out.
             val digits = remember(address) { PhoneNumbers.normalize(address) }
@@ -1388,7 +1387,7 @@ fun NewMessageScreen(
             }
         }
 
-        Column(Modifier.padding(padding).fillMaxSize().imePadding()) {
+        Column(Modifier.padding(padding).fillMaxSize()) {
             // Scrollable recipient-editing area takes the free space...
             Column(
                 Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())

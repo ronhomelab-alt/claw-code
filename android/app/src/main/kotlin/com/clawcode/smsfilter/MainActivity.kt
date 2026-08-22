@@ -10,8 +10,10 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
@@ -47,6 +49,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Manifest sets adjustNothing (Compose owns the keyboard inset), but
+        // Android 10 doesn't report IME insets — let the window resize there.
+        if (android.os.Build.VERSION.SDK_INT < 30) {
+            @Suppress("DEPRECATION")
+            window.setSoftInputMode(
+                android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            )
+        }
         requestRuntimePermissions()
 
         val app = App.from(this)
@@ -60,83 +70,94 @@ class MainActivity : ComponentActivity() {
                 // messaging code, so a startup crash can never hide its own
                 // diagnosis behind a crash loop.
                 var showCrashReport by remember { mutableStateOf(crashFile.exists()) }
-                if (showCrashReport) {
-                    CrashReportScreen(
-                        trace = remember {
-                            runCatching { crashFile.readText() }
-                                .getOrDefault("(crash report unreadable)")
-                        },
-                        onDismiss = {
-                            runCatching { crashFile.delete() }
-                            showCrashReport = false
-                        },
-                    )
-                    return@SmsFilterTheme
-                }
-
-                var screen by remember { mutableStateOf<Screen>(initialScreen) }
-
-                BackHandler(enabled = screen != Screen.Conversations) {
-                    screen = Screen.Conversations
-                }
-
-                when (val current = screen) {
-                    is Screen.Conversations -> ConversationsScreen(
-                        repository = app.messagingRepository,
-                        ruleStore = app.ruleStore,
-                        blockedLog = app.blockedLog,
-                        settings = app.settings,
-                        metaStore = app.metaStore,
-                        onOpenThread = {
-                            screen = Screen.Thread(it.threadId, it.address)
-                        },
-                        onNewMessage = { screen = Screen.NewMessage },
-                        onOpenFilters = { screen = Screen.Filters },
-                        onOpenSearch = { screen = Screen.Search },
-                    )
-                    is Screen.Thread -> ThreadScreen(
-                        repository = app.messagingRepository,
-                        ruleStore = app.ruleStore,
-                        blockedLog = app.blockedLog,
-                        metaStore = app.metaStore,
-                        threadId = current.threadId,
-                        address = current.address,
-                        onBack = { screen = Screen.Conversations },
-                    )
-                    is Screen.Search -> SearchScreen(
-                        repository = app.messagingRepository,
-                        metaStore = app.metaStore,
-                        onOpenThread = {
-                            screen = Screen.Thread(it.threadId, it.address)
-                        },
-                        onBack = { screen = Screen.Conversations },
-                    )
-                    is Screen.NewMessage -> NewMessageScreen(
-                        repository = app.messagingRepository,
-                        onSent = { threadId, address ->
-                            screen = Screen.Thread(threadId, address)
-                        },
-                        onBack = { screen = Screen.Conversations },
-                    )
-                    is Screen.Filters -> FiltersScreen(
-                        ruleStore = app.ruleStore,
-                        blockedLog = app.blockedLog,
-                        settings = app.settings,
-                        repository = app.messagingRepository,
-                        isDefaultSmsApp = { isDefaultSmsApp() },
-                        onRequestDefaultSmsRole = { requestDefaultSmsRole() },
-                        onOpenNotificationAccess = {
-                            startActivity(
-                                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                            )
-                        },
-                        onOpenThread = {
-                            screen = Screen.Thread(it.threadId, it.address)
-                        },
-                        onBack = { screen = Screen.Conversations },
-                    )
+                // The keyboard inset is applied exactly once, here at the
+                // root (the window itself never resizes — adjustNothing).
+                // imePadding consumes the inset, so screens below can't
+                // accidentally apply it a second time.
+                Box(Modifier.imePadding()) {
+                    if (showCrashReport) {
+                        CrashReportScreen(
+                            trace = remember {
+                                runCatching { crashFile.readText() }
+                                    .getOrDefault("(crash report unreadable)")
+                            },
+                            onDismiss = {
+                                runCatching { crashFile.delete() }
+                                showCrashReport = false
+                            },
+                        )
+                    } else {
+                        AppScreens(app, initialScreen)
+                    }
                 }
             }
+        }
+    }
+
+    /** Screen state and navigation between the app's top-level screens. */
+    @Composable
+    private fun AppScreens(app: App, initialScreen: Screen) {
+        var screen by remember { mutableStateOf<Screen>(initialScreen) }
+
+        BackHandler(enabled = screen != Screen.Conversations) {
+            screen = Screen.Conversations
+        }
+
+        when (val current = screen) {
+            is Screen.Conversations -> ConversationsScreen(
+                repository = app.messagingRepository,
+                ruleStore = app.ruleStore,
+                blockedLog = app.blockedLog,
+                settings = app.settings,
+                metaStore = app.metaStore,
+                onOpenThread = {
+                    screen = Screen.Thread(it.threadId, it.address)
+                },
+                onNewMessage = { screen = Screen.NewMessage },
+                onOpenFilters = { screen = Screen.Filters },
+                onOpenSearch = { screen = Screen.Search },
+            )
+            is Screen.Thread -> ThreadScreen(
+                repository = app.messagingRepository,
+                ruleStore = app.ruleStore,
+                blockedLog = app.blockedLog,
+                metaStore = app.metaStore,
+                threadId = current.threadId,
+                address = current.address,
+                onBack = { screen = Screen.Conversations },
+            )
+            is Screen.Search -> SearchScreen(
+                repository = app.messagingRepository,
+                metaStore = app.metaStore,
+                onOpenThread = {
+                    screen = Screen.Thread(it.threadId, it.address)
+                },
+                onBack = { screen = Screen.Conversations },
+            )
+            is Screen.NewMessage -> NewMessageScreen(
+                repository = app.messagingRepository,
+                onSent = { threadId, address ->
+                    screen = Screen.Thread(threadId, address)
+                },
+                onBack = { screen = Screen.Conversations },
+            )
+            is Screen.Filters -> FiltersScreen(
+                ruleStore = app.ruleStore,
+                blockedLog = app.blockedLog,
+                settings = app.settings,
+                repository = app.messagingRepository,
+                isDefaultSmsApp = { isDefaultSmsApp() },
+                onRequestDefaultSmsRole = { requestDefaultSmsRole() },
+                onOpenNotificationAccess = {
+                    startActivity(
+                        Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                    )
+                },
+                onOpenThread = {
+                    screen = Screen.Thread(it.threadId, it.address)
+                },
+                onBack = { screen = Screen.Conversations },
+            )
         }
     }
 

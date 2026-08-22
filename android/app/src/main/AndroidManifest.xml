@@ -23,9 +23,18 @@
           Required component #1 for the default-SMS-app role: an activity that
           handles composing. Also the app's main rules-management screen.
         -->
+        <!--
+          adjustNothing: the window must never resize for the keyboard —
+          Compose applies the IME inset exactly once at the app root. With the
+          default mode, Android 15's edge-to-edge enforcement delivers IME
+          insets AND the window still resizes, shoving the composer up by
+          twice the keyboard height. (MainActivity restores adjustResize on
+          API < 30, where IME insets aren't reported.)
+        -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:windowSoftInputMode="adjustNothing">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
