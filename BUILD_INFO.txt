@@ -1,0 +1,1 @@
+v0.8.2 | release APK (debug-signed, non-debuggable) built from 4f20f413c0572a383527c93ca6b630b7a4f1e52f on 2026-08-25T12:09:48Z
