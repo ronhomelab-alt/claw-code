@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -77,11 +79,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.clawcode.smsfilter.core.PhoneNumbers
@@ -770,6 +779,9 @@ fun ThreadScreen(
     val listState = rememberLazyListState()
     var loadedCount by remember { mutableIntStateOf(0) }
     var newWhileAway by remember { mutableIntStateOf(0) }
+    // Message ids whose links the user deliberately switched on. Kept only
+    // in memory: leaving the thread disarms every link again.
+    var linksEnabledFor by remember { mutableStateOf(setOf<Long>()) }
 
     LaunchedEffect(tick, threadId) {
         val fresh = withContext(Dispatchers.IO) {
@@ -1043,6 +1055,22 @@ fun ThreadScreen(
                             fontScale = fontScale,
                             groupedWithPrev = groupedWithPrev,
                             groupedWithNext = groupedWithNext,
+                            linksOn = message.id in linksEnabledFor,
+                            onToggleLinks = {
+                                val turningOn = message.id !in linksEnabledFor
+                                linksEnabledFor = if (turningOn) {
+                                    linksEnabledFor + message.id
+                                } else {
+                                    linksEnabledFor - message.id
+                                }
+                                if (turningOn) {
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar(
+                                            "Links on for this message — tap the switch again to turn off"
+                                        )
+                                    }
+                                }
+                            },
                             onRetry = {
                                 when (val result = repository.send(address, message.body)) {
                                     is SendResult.Sent -> scope.launch {
@@ -1193,6 +1221,78 @@ internal fun withReactionEmoji(body: String, enabled: Boolean): String {
     return "$emoji $body"
 }
 
+/** URLs in message bodies: http(s) links and www-prefixed hosts. */
+private val URL_REGEX = Regex("""(?i)\b(?:https?://|www\.)[^\s]+""")
+
+internal fun containsUrl(body: String): Boolean = URL_REGEX.containsMatchIn(body)
+
+/**
+ * Marks each URL in [body] as a tappable, underlined link. Only called after
+ * the user flips the per-message link switch — links are dead text otherwise.
+ */
+private fun linkifiedBody(
+    body: String,
+    linkColor: androidx.compose.ui.graphics.Color,
+): androidx.compose.ui.text.AnnotatedString = buildAnnotatedString {
+    var last = 0
+    for (match in URL_REGEX.findAll(body)) {
+        var url = match.value
+        // Trailing punctuation belongs to the sentence, not the link.
+        while (url.isNotEmpty() && url.last() in ".,;:!?)]}\"'") url = url.dropLast(1)
+        if (url.isEmpty()) continue
+        append(body.substring(last, match.range.first))
+        val target = if (url.startsWith("www", ignoreCase = true)) "https://$url" else url
+        withLink(
+            LinkAnnotation.Url(
+                target,
+                TextLinkStyles(
+                    style = SpanStyle(
+                        color = linkColor,
+                        fontWeight = FontWeight.Bold,
+                        textDecoration = TextDecoration.Underline,
+                    ),
+                ),
+            )
+        ) { append(url) }
+        last = match.range.first + url.length
+    }
+    append(body.substring(last))
+}
+
+/**
+ * Per-message link switch, riding the bubble's corner: dim hollow circle =
+ * links off (default), filled accent circle = links live. Turning links on
+ * has to be a deliberate act, so a scam link can't be fat-fingered.
+ */
+@Composable
+private fun LinkToggleBadge(on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(
+                if (on) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.surface
+            )
+            .border(
+                width = 1.5.dp,
+                color = if (on) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.outline,
+                shape = CircleShape,
+            )
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            painter = androidx.compose.ui.res.painterResource(R.drawable.ic_link),
+            contentDescription = if (on) "Turn links off" else "Turn links on",
+            tint = if (on) MaterialTheme.colorScheme.onPrimary
+            else MaterialTheme.colorScheme.outline,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
 @Composable
 private fun MessageBubble(
     message: ThreadMessage,
@@ -1200,6 +1300,8 @@ private fun MessageBubble(
     groupedWithPrev: Boolean = false,
     groupedWithNext: Boolean = false,
     onRetry: (() -> Unit)? = null,
+    linksOn: Boolean = false,
+    onToggleLinks: (() -> Unit)? = null,
 ) {
     val outgoing = message.isOutgoing
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1233,6 +1335,7 @@ private fun MessageBubble(
             .padding(bottom = if (groupedWithNext) 2.dp else 8.dp),
         horizontalArrangement = if (outgoing) Arrangement.End else Arrangement.Start,
     ) {
+        Box {
         Surface(
             color = if (failed) {
                 MaterialTheme.colorScheme.errorContainer
@@ -1268,12 +1371,25 @@ private fun MessageBubble(
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             }
             Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                Text(
-                    displayBody,
-                    fontSize = 16.sp * fontScale,
-                    lineHeight = 22.sp * fontScale,
-                    color = contentColor,
-                )
+                if (linksOn) {
+                    Text(
+                        linkifiedBody(
+                            displayBody,
+                            if (!outgoing && !failed) MaterialTheme.colorScheme.primary
+                            else contentColor,
+                        ),
+                        fontSize = 16.sp * fontScale,
+                        lineHeight = 22.sp * fontScale,
+                        color = contentColor,
+                    )
+                } else {
+                    Text(
+                        displayBody,
+                        fontSize = 16.sp * fontScale,
+                        lineHeight = 22.sp * fontScale,
+                        color = contentColor,
+                    )
+                }
                 // Timestamp on the last bubble of a group; always on failures.
                 if (!groupedWithNext || deliveryLabel != null) {
                     Text(
@@ -1291,6 +1407,18 @@ private fun MessageBubble(
                     )
                 }
             }
+        }
+        // Link switch rides the bubble's top corner, mirrored to stay
+        // toward the middle of the screen on outgoing bubbles.
+        if (onToggleLinks != null && containsUrl(displayBody)) {
+            LinkToggleBadge(
+                on = linksOn,
+                onClick = onToggleLinks,
+                modifier = Modifier
+                    .align(if (outgoing) Alignment.TopStart else Alignment.TopEnd)
+                    .offset(x = if (outgoing) (-8).dp else 8.dp, y = (-8).dp),
+            )
+        }
         }
     }
 }

@@ -324,7 +324,7 @@ private fun ProtectionCard(
             Text("Always-on guarantees", style = MaterialTheme.typography.bodyMedium)
             listOf(
                 "No internet permission — rules and messages never leave your phone.",
-                "Links in messages are never auto-opened.",
+                "Links are dead text until you flip that message's link switch.",
                 "MMS attachments are never auto-downloaded.",
                 "Saved contacts are exempt from area-code and keyword rules.",
                 "One-time passcodes are never blocked by keyword rules.",
@@ -644,9 +644,10 @@ private fun SetupTab(
                         "Open the app to read messages."
                 )
                 Text(
-                    "Always on: message text is never rendered as clickable links, and " +
-                        "MMS attachments are never downloaded — nothing in a message " +
-                        "can auto-fetch content or execute.",
+                    "Always on: links in messages stay unclickable until you " +
+                        "deliberately tap that message's link switch (and disarm again " +
+                        "when you leave the conversation), and MMS attachments are never " +
+                        "downloaded — nothing in a message can auto-fetch content or execute.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
