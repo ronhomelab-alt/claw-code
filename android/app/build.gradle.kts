@@ -16,6 +16,32 @@ android {
         versionName = "0.1.0"
     }
 
+    // Release signing comes ONLY from the environment (CI secrets or a keystore
+    // kept outside the repo). Never commit a keystore: a key that was public
+    // once can sign "updates" that install over this app forever. If no
+    // keystore is provided the release build is left unsigned instead of
+    // silently falling back to a debug key.
+    val releaseKeystore = System.getenv("RELEASE_KEYSTORE_FILE")
+        ?.let { file(it) }
+        ?.takeIf { it.exists() }
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
+        }
+    }
+
     buildFeatures {
         compose = true
     }
