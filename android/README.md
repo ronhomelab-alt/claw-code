@@ -87,3 +87,33 @@ gradle :app:assembleDebug
   trusted anyway.
 - Planned: contact-list auto-allow, per-rule hit counts, undo/restore from
   quarantine into the inbox, export/import UI, report-to-7726 shortcut.
+
+## Signing
+
+Debug builds use the Gradle-generated debug key on each machine/runner. Do not
+commit a keystore to this repository (one was committed in July 2026 and has
+been treated as burned since).
+
+To produce installable release builds from CI, create a keystore locally and
+keep it out of git:
+
+```bash
+keytool -genkeypair -v -keystore ~/keys/smsfilter-release.jks -alias smsfilter \
+  -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Then add these repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `RELEASE_KEYSTORE_B64` | `base64 -i ~/keys/smsfilter-release.jks` |
+| `RELEASE_KEYSTORE_PASSWORD` | keystore password |
+| `RELEASE_KEY_ALIAS` | `smsfilter` |
+| `RELEASE_KEY_PASSWORD` | key password |
+
+The `Android APK` workflow decodes the keystore into the runner's temp dir,
+builds `:app:assembleRelease`, uploads `app-release.apk`, and deletes the
+keystore. Locally, export the same four variables (`RELEASE_KEYSTORE_FILE`
+pointing at the `.jks`) before running `gradle -p android :app:assembleRelease`.
+Apps already installed from a build signed with the old key must be uninstalled
+before a build with the new key will install.
